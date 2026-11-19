@@ -1,0 +1,11 @@
+node_modules/
+*.tgz
+*.log
+*.tmp
+coverage/
+.verify*/
+.audit*/
+.env
+.env.*
+!.env.example
+.DS_Store
