@@ -30,8 +30,8 @@ window.__ModuleLoader__.load({
       revoke: 'Revoke', revoked: 'Access revoked', invite: 'Invite a new device', hideInvite: 'Hide',
       inviteToken: 'Invitation code', inviteExpires: 'Expires', inviteHint: 'Send this code to the other device. It works once and expires in 24 hours.',
       joinUrl: 'Address', joinToken: 'Invitation code', joinKind: 'The other device is a', ssh: 'Use an SSH tunnel (optional)',
-      sshHost: 'SSH host', sshUser: 'User', sshIdentity: 'Private key file', sshKnownHosts: 'known_hosts file', sshRemotePort: 'Remote port',
-      sshHint: 'Uses the system OpenSSH client. This plugin never stores your private key.',
+      sshHost: 'SSH host', sshUser: 'User', sshIdentity: 'Private key file', sshPort: 'SSH port',
+      sshHint: 'Uses the system OpenSSH client. The host key is verified on first connection and remembered; it never stores your private key.',
       secureHint: 'Use HTTPS on public networks, plain HTTP only on a trusted LAN, or an SSH tunnel. Anyone with the invitation code can use it.',
       advice: 'Suggestions', adviceHint: 'Based on this device, applied in one click',
       notIncluded: 'plugins are not in the sync scope', adoptAll: 'Add all', allIncluded: 'All included',
@@ -104,7 +104,7 @@ window.__ModuleLoader__.load({
       netSsh: 'SSH tunnel', netSshDesc: 'Key-based access; the remote side listens only locally',
       netPublic: 'Public network', netPublicDesc: 'HTTPS address plus a token; keep the token private',
       lanHint: 'LAN uses http://IP:3080. The invitation token is the only credential — send it privately.',
-      sshModeHint: 'SSH uses your key as the credential. Fill in the SSH host, user and key paths.',
+      sshModeHint: 'SSH uses your key as the credential. Fill in the SSH host, user, key path and port (default 22).',
       publicHint: 'Public access must use https:// and a token. Anyone with the token can join.',
       inviteLink: 'Invitation link', inviteLinkHint: 'Paste the full link shared by the other device',
       parseLink: 'Parse link', linkParsed: 'Link parsed. Verify it before connecting.',
@@ -142,8 +142,8 @@ window.__ModuleLoader__.load({
       revoke: '撤销', revoked: '已撤销', invite: '邀请新设备', hideInvite: '收起',
       inviteToken: '邀请码', inviteExpires: '到期', inviteHint: '把邀请码发给对方，24 小时内有效，用一次就失效。',
       joinUrl: '对方地址', joinToken: '邀请码', joinKind: '对方是', ssh: '走 SSH 隧道（可选）',
-      sshHost: 'SSH 主机', sshUser: '用户', sshIdentity: '私钥文件', sshKnownHosts: 'known_hosts 文件', sshRemotePort: '远端端口',
-      sshHint: '调用系统 OpenSSH，插件不保存你的私钥。',
+      sshHost: 'SSH 主机', sshUser: '用户', sshIdentity: '私钥文件', sshPort: 'SSH 端口',
+      sshHint: '调用系统 OpenSSH，首次连接自动记录主机指纹，之后指纹变化会拒绝；插件不保存你的私钥。',
       secureHint: '公网用 HTTPS，可信局域网才用明文 HTTP，或用 SSH 隧道。拿到邀请码的人就能连，请私下发送。',
       advice: '建议', adviceHint: '按这台设备的现状给出，点一下就应用',
       notIncluded: '个插件还没纳入同步', adoptAll: '全部纳入', allIncluded: '都已纳入',
@@ -216,7 +216,7 @@ window.__ModuleLoader__.load({
       netSsh: 'SSH 隧道', netSshDesc: '用密钥登录，远端只监听本机',
       netPublic: '公网', netPublicDesc: 'HTTPS 地址加邀请码，邀请码不要外传',
       lanHint: '局域网用 http://设备IP:3080。邀请码是唯一凭据，请私下发送。',
-      sshModeHint: 'SSH 用你的私钥作凭据，填好 SSH 主机、用户和密钥路径。',
+      sshModeHint: 'SSH 用你的私钥作凭据，填好 SSH 主机、用户、密钥路径和端口（默认 22）。',
       publicHint: '公网请用 https:// 地址并带邀请码，拿到邀请码的人就能连。',
       inviteLink: '邀请链接', inviteLinkHint: '粘贴对方发来的完整链接',
       parseLink: '解析链接', linkParsed: '链接已解析，连接前请先验证。',
@@ -331,7 +331,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
     const GUIDE_KEY = 'dsh-plugin-sync:guide-dismissed:v1'
     const defaultConnection = () => ({
       setup: null, preset: null, mode: 'lan', link: '', verified: false, host: '',
-      form: { kind: 'joinCenter', url: '', token: '', ssh: false, host: '', user: '', identityFile: '', knownHostsFile: '', remotePort: '3080' },
+      form: { kind: 'joinCenter', url: '', token: '', ssh: false, host: '', user: '', identityFile: '', port: '22', remotePort: '3080' },
     })
     function parseInviteLink(raw) {
       try {
@@ -348,10 +348,11 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         if (!base || !token) return null
         if (/^ssh:\/\//i.test(base)) {
           const parsed = new URL(base)
-          const remotePort = query.remote || '3080'
+          const remotePort = Number(query.remote) >= 1 && Number(query.remote) <= 65535 ? query.remote : '3080'
+          const port = Number(query.port) >= 1 && Number(query.port) <= 65535 ? query.port : '22'
           return {
             url: `http://127.0.0.1:${remotePort}`, token,
-            ssh: true, host: parsed.hostname, user: parsed.username || '', remotePort,
+            ssh: true, host: parsed.hostname, user: parsed.username || '', port, remotePort,
           }
         }
         if (!/^https?:\/\//i.test(base)) return null
@@ -958,7 +959,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const peers = Object.values(state.peers ?? {})
       const peerLimit = role === 'peer' && (Boolean(state.center) || peers.some((peer) => peer.status === 'connected'))
       const disabled = Boolean(ctl.busy)
-      const sshArgs = () => form.ssh ? { kind: 'ssh', host: form.host.trim(), user: form.user.trim(), identityFile: form.identityFile.trim(), knownHostsFile: form.knownHostsFile.trim(), remotePort: Number(form.remotePort) || 3080 } : undefined
+      const sshArgs = () => form.ssh ? { kind: 'ssh', host: form.host.trim(), user: form.user.trim(), identityFile: form.identityFile.trim(), port: Number(form.port) || 22, remotePort: Number(form.remotePort) || 3080 } : undefined
       const createInvite = () => ctl.run('connection', async () => {
         const value = await call('invite')
         if (typeof value?.token !== 'string' || !value.token) throw { code: 'bad-response' }
@@ -991,7 +992,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         const token = encodeURIComponent(invite.token)
         if (mode === 'ssh') {
           const user = form.user.trim() ? `${form.user.trim()}@` : ''
-          return `ssh://${user}${form.host.trim() || 'host'}/plugin-sync/join?invite=${token}&remote=${form.remotePort || '3080'}`
+          return `ssh://${user}${form.host.trim() || 'host'}/plugin-sync/join?invite=${token}&remote=${form.remotePort || '3080'}&port=${form.port || '22'}`
         }
         const base = (connection.host || originHint() || 'http://127.0.0.1:3080').replace(/\/$/, '')
         const withScheme = /^https?:\/\//i.test(base) ? base : `${mode === 'public' ? 'https://' : 'http://'}${base}`
@@ -1043,11 +1044,9 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           h('details', { style: { marginTop: 8 }, open: mode === 'ssh' }, h('summary', { style: { fontSize: 12, cursor: 'pointer' } }, t('ssh')),
             h('div', { className: 'ps-row', style: { marginTop: 8 } },
               h('label', { className: 'ps-check' }, h('input', { type: 'checkbox', checked: form.ssh, onChange: (event) => setForm({ ...form, ssh: event.target.checked }) }), t('ssh')),
-              ['host', 'user', 'identityFile', 'knownHostsFile'].map((key) => h('label', { key, className: 'ps-field', style: { flex: '1 1 150px' } },
-                h('span', {}, t(key === 'host' ? 'sshHost' : key === 'user' ? 'sshUser' : key === 'identityFile' ? 'sshIdentity' : 'sshKnownHosts')),
-                h('input', { className: 'ps-input', value: form[key], disabled: !form.ssh, onChange: (event) => setForm({ ...form, [key]: event.target.value }) }))),
-              h('label', { className: 'ps-field' }, h('span', {}, t('sshRemotePort')),
-                h('input', { className: 'ps-input', value: form.remotePort, disabled: !form.ssh, onChange: (event) => setForm({ ...form, remotePort: event.target.value }) }))),
+              ['host', 'user', 'identityFile', 'port'].map((key) => h('label', { key, className: 'ps-field', style: { flex: '1 1 150px' } },
+                h('span', {}, t(key === 'host' ? 'sshHost' : key === 'user' ? 'sshUser' : key === 'identityFile' ? 'sshIdentity' : 'sshPort')),
+                h('input', { className: 'ps-input', value: form[key], disabled: !form.ssh, onChange: (event) => setForm({ ...form, [key]: event.target.value }) })))),
             note(t('sshHint'))),
           h('div', { className: 'ps-row', style: { marginTop: 10 } },
             h(Button, { disabled: disabled || !form.url.trim() || !form.token.trim(), onClick: verify }, t('verifyLink')),

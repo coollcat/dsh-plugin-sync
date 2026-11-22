@@ -1,6 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { EventEmitter } from 'node:events'
+import os from 'node:os'
+import path from 'node:path'
 
 import { exportSnapshot, parseSnapshot, verifySnapshot } from '../lib/snapshot.js'
 import { createSshTransport } from '../lib/ssh-transport.js'
@@ -111,12 +113,15 @@ test('ssh transport keeps host-key checking on and never sends raw secrets in ar
     return child
   }
   const transport = createSshTransport({
-    host: 'example.test', user: 'sync', identityFile: '/keys/id_ed25519', knownHostsFile: '/keys/known_hosts', spawnImpl: fakeSpawn,
+    host: 'example.test', user: 'sync', identityFile: '/keys/id_ed25519', spawnImpl: fakeSpawn,
   })
   const result = await transport.send('http://127.0.0.1:3080/plugin-sync/state', { method: 'POST', token: 'secret-token', body: { a: 1 } })
   assert.deepEqual(result, { ok: true })
   assert.equal(captured.command, 'ssh')
-  assert.ok(captured.args.includes('StrictHostKeyChecking=yes'))
+  assert.ok(captured.args.includes('StrictHostKeyChecking=accept-new'))
+  const knownHostsArg = captured.args.find((a) => a.startsWith('UserKnownHostsFile='))
+  assert.equal(knownHostsArg, `UserKnownHostsFile=${path.join(os.homedir(), '.ssh', 'known_hosts')}`)
+  assert.equal(captured.args[captured.args.indexOf('-p') + 1], '22')
   assert.ok(captured.args.includes('BatchMode=yes'))
   assert.equal(captured.args.join(' ').includes('secret-token'), false)
   assert.equal(captured.args.join(' ').includes(Buffer.from('secret-token').toString('base64')), false)

@@ -2,6 +2,7 @@
 
 ## 未发布
 
+- SSH 连接表单简化：用户只需填 SSH 主机、用户、私钥路径和 SSH 端口（默认 22），不再要求手填 `known_hosts` 路径；远端 DSH HTTP 端口固定 3080。传输改用 `StrictHostKeyChecking=accept-new`，首次连接自动把主机指纹写入系统默认 `~/.ssh/known_hosts`，之后指纹变化仍拒绝，保留 host key 校验、无关闭校验快捷模式。邀请链接的 `ssh://` URL 带 `port` 参数以便对端还原。
 - 建议卡按插件性质分类：普通插件仍建议「纳入同步」，设备专属插件（IM / 记忆 / 聊天类，账号或状态绑定本机）建议「留本机」且其设置不同步；系统/停用/已纳入规则不变。`analyzePlugins` 增加 `isDeviceLocal` 判定，`docs/USAGE.md` 同步说明。
 
 ## 0.4.0 — 2026-11-21

@@ -53,9 +53,9 @@ const plugin=()=>{const record={kind:'plugin',key:'example-plugin',enabled:false
  test('SSH uses direct TCP forwarding, complete HTTP target and no credential in local or remote argv',async()=>{
   let captured,input
   const spawnImpl=(command,args)=>{captured={command,args};const child=new EventEmitter();child.stdout=new EventEmitter();child.stderr=new EventEmitter();child.stdin={end(value){input=value}};process.nextTick(()=>{const body='{"status":"ok"}';child.stdout.emit('data',Buffer.from(`HTTP/1.1 200 OK\r\nContent-Length: ${body.length}\r\n\r\n${body}`));child.emit('close',0)});return child}
-  const ssh=createSshTransport({host:'example.com',user:'user',identityFile:'/keys/id_ed25519',knownHostsFile:'/keys/known_hosts',spawnImpl})
+  const ssh=createSshTransport({host:'example.com',user:'user',identityFile:'/keys/id_ed25519',spawnImpl})
   assert.equal((await ssh.send('http://127.0.0.1:3010/plugin-sync/state',{token:'fake-peer-token',body:{hello:1}})).status,'ok')
-  assert.ok(captured.args.includes('-W'));assert.ok(captured.args.includes('127.0.0.1:3010'));assert.equal(captured.args.join(' ').includes('fake-peer-token'),false);assert.equal(captured.args.join(' ').includes('curl'),false);assert.match(input,/^POST \/plugin-sync\/state HTTP\/1.1/);assert.match(input,/Authorization: Bearer fake-peer-token/)
+  assert.ok(captured.args.includes('-W'));assert.ok(captured.args.includes('127.0.0.1:3010'));assert.ok(captured.args.includes('StrictHostKeyChecking=accept-new'));assert.equal(captured.args.join(' ').includes('fake-peer-token'),false);assert.equal(captured.args.join(' ').includes('curl'),false);assert.match(input,/^POST \/plugin-sync\/state HTTP\/1.1/);assert.match(input,/Authorization: Bearer fake-peer-token/)
   assert.throws(()=>createSshTransport({host:'-oProxyCommand=bad',user:'user',identityFile:'/keys/id',knownHostsFile:'/keys/known'}),/invalid/)
  })
  test('SSH deadline kills the subprocess and enforces response byte limits',async()=>{
