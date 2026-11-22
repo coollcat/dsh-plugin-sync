@@ -10,20 +10,18 @@ function plugin(key, enabled = true, version = '1.0.0') {
   return resource({ kind: 'plugin', key, enabled, source: { type: 'registry', package: key, version } })
 }
 const config = (value, entryId = 'row') => configRecord({ entryId, bundle: 'package-a', config: { updates: { 'literal.key': value, other: 'PRIVATE' }, token: 'SECRET' } })
-const memory = (name, content) => resource({ kind: 'memory', adapterId: 'memory', relativePath: name, key: `memory:${name}`, content, schemaVersion: 1 })
 const field = ['updates', 'literal.key']
-const shared = { include: ['row', 'memory:shared.md'], configFields: { row: [field] } }
+const shared = { include: ['row'], configFields: { row: [field] } }
 
 function node(deviceId, values = {}, transport) {
   const store = { read() { return structuredClone(this.value) }, write(next) { this.value = structuredClone(next) } }
-  const data = { plugin: [], config: [], memory: [], ...values }
+  const data = { plugin: [], config: [], ...values }
   const calls = []
   const credentials = new Map()
   const adapters = {
     profileId: deviceId, label: deviceId,
     collectInventory: async () => structuredClone(data.plugin),
     collectConfig: async () => structuredClone(data.config),
-    collectMemory: async () => ({ records: structuredClone(data.memory) }),
     getSecret: async (key) => credentials.get(key), putSecret: async (key, secret) => credentials.set(key, secret),
     install: async (source) => {
       calls.push('install')
@@ -38,7 +36,6 @@ function node(deviceId, values = {}, transport) {
       data.plugin = data.plugin.map((entry) => entry.key === key ? plugin(key, enabled, entry.source.version) : entry)
     },
     writeConfig: async (payload) => { calls.push(payload); data.config = [config(payload.config.updates['literal.key'])] },
-    writeMemory: async (payload) => { calls.push(payload); data.memory = [memory(payload.relativePath, payload.content)] },
   }
   const engine = createEngine({ store, adapters, transport, deviceId })
   const setPolicy = (patch, caps) => {
@@ -62,23 +59,25 @@ function approve(engine, plan, selection = plan.operations) {
 }
 
 test('check(all) has isolated approvals and apply binds the active policy', async () => {
-  const center = node('center', { plugin: [plugin('package-a')], config: [config('remote')], memory: [memory('shared.md', 'share')] })
+  const center = node('center', { plugin: [plugin('package-a')], config: [config('remote')] })
   center.setPolicy(shared)
   await center.engine.pairCenter({ initSource: 'local' })
   const member = node('member', { config: [config('base')] }, link(center.engine))
-  member.setPolicy(shared, { install: true, configSet: true, memWrite: true })
+  member.setPolicy(shared, { install: true, configSet: true })
   await member.engine.joinCenter({ url: ENDPOINT, token: center.engine.createInvitation().token })
-  const { plan, configPlan, memoryPlan } = await member.engine.check({ kind: 'all' })
-  assert.deepEqual([plan.operations.length, configPlan.operations.length, memoryPlan.operations.length], [2, 1, 1])
-  for (const item of [plan, configPlan, memoryPlan]) assert.equal(approve(member.engine, item).ok, true)
-  await member.engine.check({ kind: 'memory' })
-  assert.equal(Object.keys(member.engine.publicState().approvals).length, 3)
+  const { plan, configPlan } = await member.engine.check({ kind: 'all' })
+  assert.deepEqual([plan.operations.length, configPlan.operations.length], [2, 1])
+  // Each domain carries its own approval: approving the config plan does not
+  // authorize the plugin plan, and vice versa.
+  assert.equal(approve(member.engine, configPlan).ok, true)
+  assert.equal((await member.engine.apply({ planId: plan.planId })).status, 'unauthorized')
+  assert.deepEqual(member.calls, [])
   assert.equal((await member.engine.apply({ planId: configPlan.planId })).status, 'ok')
   assert.deepEqual(member.calls[0].fields, [field])
   assert.equal(member.calls[0].bundle, 'package-a')
   assert.equal(member.calls[0].expectedHash, configPlan.operations[0].fromHash)
   assert.deepEqual(member.calls[0].config, { updates: { 'literal.key': 'remote' } })
-  assert.equal((await member.engine.apply({ planId: memoryPlan.planId })).status, 'ok')
+  assert.equal(approve(member.engine, plan).ok, true)
   member.setPolicy({ direction: 'push' })
   assert.equal((await member.engine.apply({ planId: plan.planId })).status, 'unauthorized')
   assert.equal(member.calls.includes('install'), false)
@@ -86,31 +85,30 @@ test('check(all) has isolated approvals and apply binds the active policy', asyn
 
 test('pair, proposal, state, and snapshot share only policy-selected resources and config fields', async () => {
   const values = { plugin: [plugin('package-a'), plugin('private'), plugin('excluded'), plugin('@local/dsh-plugin-sync'), plugin('@deepseek-ai/official')],
-    config: [config('public'), config('not-opted-in', 'other-row')], memory: [memory('shared.md', 'public note'), memory('private.md', 'private note')] }
+    config: [config('public'), config('not-opted-in', 'other-row')] }
   const sender = node('sender', values)
   sender.setPolicy({ localOnly: ['private'], exclude: ['excluded'], protected: [] })
   await sender.engine.pairCenter({ initSource: 'local' })
   assert.deepEqual(sender.engine.publicState().expected.map(({ key }) => key), ['package-a'])
   assert.equal(sender.engine.publicState().expectedConfig.length, 0)
-  assert.equal(sender.engine.publicState().expectedMemory.length, 0)
   sender.setPolicy(shared)
   await sender.engine.publishLocal()
   const snap = await sender.engine.createSnapshot()
+  assert.deepEqual(snap.expectedConfig.map(({ key }) => key), ['row'])
   assert.deepEqual(snap.expectedConfig[0].config, { updates: { 'literal.key': 'public' } })
   assert.deepEqual(snap.expectedConfig[0].secretKeys, [])
-  assert.deepEqual(snap.expectedMemory.map(({ key }) => key), ['memory:shared.md'])
-  assert.doesNotMatch(JSON.stringify(snap), /PRIVATE|SECRET|private note|not-opted-in/)
+  assert.doesNotMatch(JSON.stringify(snap), /PRIVATE|SECRET|not-opted-in/)
   let wire
   const member = node('member', values, link(sender.engine, (method, response, body) => { if (method === 'proposals') wire = body.changeset; return response }))
   member.setPolicy({ ...shared, localOnly: ['private'], exclude: ['excluded'] })
   const invite = sender.engine.createInvitation()
   await member.engine.joinCenter({ url: ENDPOINT, token: invite.token })
   assert.equal((await member.engine.submitProposal({ kind: 'all' })).status, 'pending')
-  assert.deepEqual(wire.resources.map(({ key }) => key), ['package-a', 'row', 'memory:shared.md'])
-  assert.doesNotMatch(JSON.stringify(wire), /PRIVATE|SECRET|private note|not-opted-in/)
-  sender.setPolicy({ localOnly: ['package-a', 'row', 'memory:shared.md'] })
+  assert.deepEqual(wire.resources.map(({ key }) => key), ['package-a', 'row'])
+  assert.doesNotMatch(JSON.stringify(wire), /PRIVATE|SECRET|not-opted-in/)
+  sender.setPolicy({ localOnly: ['package-a', 'row'] })
   const state = sender.engine.handleGetState({ token: invite.token, deviceId: 'member' })
-  assert.deepEqual([state.expected, state.expectedConfig, state.expectedMemory], [[], [], []])
+  assert.deepEqual([state.expected, state.expectedConfig], [[], []])
   member.setPolicy({ direction: 'pull' })
   assert.deepEqual(await member.engine.submitProposal(), { ok: false, reason: 'direction-blocked:push' })
   assert.equal((await member.engine.createSnapshot()).ok, false)
@@ -215,22 +213,22 @@ test('two peers exchange both ways, retain divergent versions and resolve only a
   assert.equal(typeof p1.engine.createInvitation().token, 'string')
 })
 
-test('accepted P2P listener memory becomes a local apply plan without republishing', async () => {
-  const key = 'memory:shared.md'
-  const policy = { include: [key] }
+test('accepted P2P listener config becomes a local apply plan without republishing', async () => {
+  const key = 'row'
+  const policy = { include: [key], configFields: { row: [field] } }
   const listener = node('listener')
   listener.setPolicy(policy)
   await listener.engine.pairCenter({ topology: 'p2p' })
   const joiner = node('joiner', {}, link(listener.engine))
-  joiner.setPolicy(policy, { memWrite: true })
+  joiner.setPolicy(policy, { configSet: true })
   await joiner.engine.connectPeer({ url: ENDPOINT, token: listener.engine.createInvitation().token })
 
   // Establish the listener's cached view of the joiner's state before publishing.
   assert.equal((await joiner.engine.check()).status, 'ok')
-  listener.data.memory = [memory('shared.md', 'new note from listener')]
-  assert.equal((await listener.engine.submitProposal({ kind: 'memory' })).status, 'queued')
-  assert.deepEqual(listener.engine.publicState().expectedMemory, [])
-  assert.deepEqual(joiner.data.memory, [])
+  listener.data.config = [config('new note from listener')]
+  assert.equal((await listener.engine.submitProposal({ kind: 'config' })).status, 'queued')
+  assert.deepEqual(listener.engine.publicState().expectedConfig, [])
+  assert.deepEqual(joiner.data.config, [])
 
   // The joiner pulls the queued offer, accepts it, then plans against its newer
   // causal revision rather than the listener's intentionally stale publication.
@@ -238,17 +236,17 @@ test('accepted P2P listener memory becomes a local apply plan without republishi
   const proposal = joiner.engine.publicState().proposals.find(({ status }) => status === 'pending')
   assert.ok(proposal)
   assert.equal(joiner.engine.handleAcceptProposal({ proposalId: proposal.id, actor: 'user' }).status, 'accepted')
-  assert.equal(listener.engine.publicState().expectedMemory.length, 0)
-  assert.equal(joiner.engine.publicState().expectedMemory[0].key, key)
+  assert.equal(listener.engine.publicState().expectedConfig.length, 0)
+  assert.equal(joiner.engine.publicState().expectedConfig[0].key, key)
 
-  const checked = await joiner.engine.check({ kind: 'memory' })
-  assert.equal(checked.memoryPlan.operations.length, 1, JSON.stringify({ local: joiner.engine.publicState().revision, remote: joiner.engine.publicState().peers.listener, expected: joiner.engine.publicState().expectedMemory, last: joiner.engine.publicState().lastMemoryPlan }))
-  approve(joiner.engine, checked.memoryPlan)
-  assert.equal((await joiner.engine.apply({ planId: checked.memoryPlan.planId })).status, 'ok')
-  assert.equal(joiner.data.memory[0].content, 'new note from listener')
-  const second = await joiner.engine.check({ kind: 'memory' })
-  assert.equal(second.memoryPlan.operations.length, 0)
-  assert.deepEqual(listener.engine.publicState().expectedMemory, [])
+  const checked = await joiner.engine.check({ kind: 'config' })
+  assert.equal(checked.configPlan.operations.length, 1, JSON.stringify({ local: joiner.engine.publicState().revision, remote: joiner.engine.publicState().peers.listener, expected: joiner.engine.publicState().expectedConfig, last: joiner.engine.publicState().lastConfigPlan }))
+  approve(joiner.engine, checked.configPlan)
+  assert.equal((await joiner.engine.apply({ planId: checked.configPlan.planId })).status, 'ok')
+  assert.equal(joiner.data.config[0].config.updates['literal.key'], 'new note from listener')
+  const second = await joiner.engine.check({ kind: 'config' })
+  assert.equal(second.configPlan.operations.length, 0)
+  assert.deepEqual(listener.engine.publicState().expectedConfig, [])
 })
 
 

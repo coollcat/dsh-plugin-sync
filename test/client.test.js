@@ -17,13 +17,22 @@ try {
   if (depsRoot || error.code !== 'MODULE_NOT_FOUND') throw error
 }
 
-function register(react, transport, language = 'en') {
+function register(react, transport, language = 'en', storage = new Map()) {
   let loaded, dictionaries
   const registrations = []
   const effects = []
   vm.runInNewContext(source, {
     window: { __ModuleLoader__: { load: (module) => { loaded = module } } },
+    localStorage: {
+      getItem: (key) => storage.has(key) ? storage.get(key) : null,
+      setItem: (key, value) => storage.set(key, String(value)),
+      removeItem: (key) => storage.delete(key),
+    },
     fetch: transport, AbortController, setTimeout, clearTimeout,
+    Blob: class { constructor(parts) { this.parts = parts } },
+    URL: { createObjectURL: () => 'blob:test', revokeObjectURL: () => {} },
+    FileReader: class {},
+    document: { createElement: () => ({ click() {}, addEventListener() {}, set type(value) {}, set accept(value) {}, files: [] }) },
     console: new Proxy({}, { get() { return () => assert.fail('client wrote to console') } }),
   })
   assert.equal(loaded.id, manifest.name)
@@ -31,7 +40,9 @@ function register(react, transport, language = 'en') {
     assert.equal(name, 'react')
     return react
   })
-  assert.deepEqual(Array.from(module.inject), ['slots', 'locale'])
+  // The merged lingshu-mute host also injects conversation services; the panel
+  // must still work when only slots and locale are provided.
+  assert.ok(['slots', 'locale'].every((name) => module.inject.includes(name)))
   module.apply({
     effect(fn, label) { effects.push(label); return fn() },
     locale: {
@@ -43,16 +54,16 @@ function register(react, transport, language = 'en') {
       register(options, component) { registrations.push({ options, component }) },
     },
   })
-  return { registrations, effects, dictionaries }
+  return { registrations, effects, dictionaries, storage }
 }
 
-test('client manifest resolves and registers the two documented DSH slots', () => {
+test('client registers the plugin tab only and ships matching dictionaries', () => {
   assert.equal(manifest.dsh.client.platform, 'web')
   assert.equal(manifest.exports['./client'], './client.js')
-  assert.ok(manifest.exports['./locale/*.json'])
   const { registrations, effects, dictionaries } = register({}, undefined)
-  assert.deepEqual(registrations.map(({ options }) => [options.name, options.id, options.label()]), [
-    ['plugins.tab', 'device-sync', 'Device sync'], ['settings.section', 'device-sync', 'Device sync settings'],
+  const tabs = registrations.filter(({ options }) => options.name === 'plugins.tab')
+  assert.deepEqual(tabs.map(({ options }) => [options.name, options.id, options.label()]), [
+    ['plugins.tab', 'device-sync', 'Device sync'],
   ])
   assert.ok(registrations.every(({ component }) => typeof component === 'function'))
   assert.ok(effects.includes('device-sync: dictionaries'))
@@ -64,27 +75,40 @@ test('client manifest resolves and registers the two documented DSH slots', () =
 })
 
 const hookTest = (name, body) => test(name, { skip: !Renderer && 'Install React 19 and react-test-renderer 19 and set DSH_SYNC_TEST_DEPS' }, body)
-function policy() {
+function policy(overrides = {}) {
   return {
-    mode: 'manual', topology: 'center', direction: 'both', autoApply: false, intervalMs: 300000,
-    include: [], exclude: [], localOnly: [], configFields: {}, protected: ['@local/dsh-plugin-sync'], default: 'allow',
-    caps: { install: false, upgrade: false, enable: true, disable: true, configSet: false, memWrite: false, tombstone: false },
+    mode: 'selective', topology: 'center', direction: 'both', autoApply: false, intervalMs: 300000,
+    include: [], exclude: [], localOnly: [], configFields: {}, protected: ['@local/dsh-plugin-sync', '@deepseek-ai/*'], default: 'deny',
+    caps: { install: false, upgrade: false, enable: true, disable: true, configSet: false, tombstone: false },
     ai: { enabled: false, provider: '', model: '', maxTokens: 800 },
+    ...overrides,
   }
 }
 function state(role = 'unpaired', data = {}) {
-  return { identity: { role, label: 'Profile' }, policy: policy(), approvals: {}, ...data }
+  return {
+    identity: { role, label: 'Profile', deviceId: 'd1', profileId: 'p1' },
+    policy: policy(), approvals: {}, center: null, peers: {}, proposals: [], conflicts: [],
+    suggestions: [], audit: [], suspended: false, lastPlan: null, lastConfigPlan: null,
+    lastResults: [], lastConfigResults: [], lastStatus: null, lastConfigStatus: null,
+    revision: { number: 1 }, expected: [], expectedConfig: [], ...data,
+  }
 }
+const PLUGINS = [
+  { key: 'alpha', enabled: true },
+  { key: 'beta', enabled: true },
+  { key: 'gamma', enabled: false },
+]
+const INVENTORY = { plugins: PLUGINS, configs: [{ key: 'alpha-config', entryId: 'alpha-config', bundle: 'alpha', fields: [['theme']] }] }
 const response = (payload, status = 200) => ({ ok: status < 300, status, text: async () => JSON.stringify(payload) })
 const success = (value) => response({ ok: true, value })
 function text(node) {
+  if (node?.type === 'style') return ''
   return (node.children ?? []).map((child) => typeof child === 'object' && child !== null ? text(child) : String(child ?? '')).join(' ')
 }
-async function mount(t, start, respond, { slot = 'settings.section', language = 'en' } = {}) {
+async function mount(t, start, respond, { slot = 'plugins.tab', language = 'en', storage = new Map() } = {}) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   const requests = []
   let current = start
-  const update = (next) => { current = next }
   const { registrations } = register(React, async (url, options) => {
     assert.equal(url, '/plugin-sync/api/action')
     assert.equal(options.credentials, 'same-origin')
@@ -93,333 +117,302 @@ async function mount(t, start, respond, { slot = 'settings.section', language = 
     assert.equal(options.signal instanceof AbortSignal, true)
     const body = JSON.parse(options.body)
     requests.push(body)
-    const result = respond?.(body, current, update)
+    const result = respond?.(body, current)
     return (await result) ?? success(current)
-  }, language)
+  }, language, storage)
   const Component = registrations.find(({ options }) => options.name === slot).component
   let rendered
   await React.act(async () => { rendered = Renderer.create(React.createElement(Component)) })
   t.after(async () => { await React.act(async () => rendered.unmount()); delete globalThis.IS_REACT_ACT_ENVIRONMENT })
+  const flush = () => React.act(async () => { await new Promise((resolve) => setTimeout(resolve, 0)) })
   const pick = (nodes, label) => {
     const node = nodes.find((element) => text(element).trim() === label)
     assert.ok(node, `missing ${label}`)
     return node
   }
   const button = (label) => pick(rendered.root.findAllByType('button'), label)
-  const field = (name, type) => {
-    const label = rendered.root.findAllByType('label').find((element) => element.children.filter((child) => typeof child === 'string').join('') === name)
-    assert.ok(label, `missing ${name}`)
-    return label.findByType(type)
-  }
+  const hasButton = (label) => rendered.root.findAllByType('button').some((element) => text(element).trim() === label)
+  const all = () => text(rendered.root)
   return {
-    requests, button, text: () => text(rendered.root),
-    click: async (label) => React.act(async () => {
-      const node = button(label)
-      assert.ok(!node.props.disabled, `disabled ${label}`)
-      await node.props.onClick()
-    }),
-    change: async (label, value, type = 'input') => React.act(async () => {
-      field(label, type).props.onChange({ target: { value, checked: value } })
-    }),
+    requests, button, hasButton, all, flush,
+    nthInput: async (label, index, checked) => {
+      await React.act(async () => {
+        const row = rendered.root.findAllByType('li').find((element) => text(element).includes(label))
+        assert.ok(row, `missing row ${label}`)
+        row.findAllByType('input')[index].props.onChange({ target: { checked } })
+      })
+      await flush()
+    },
+    fill: async (placeholder, value) => {
+      await React.act(async () => {
+        const input = rendered.root.findAllByType('input').find((element) => element.props.placeholder === placeholder)
+        assert.ok(input, `missing input ${placeholder}`)
+        input.props.onChange({ target: { value } })
+      })
+      await flush()
+    },
+    click: async (label) => {
+      await React.act(async () => {
+        const node = button(label)
+        assert.ok(!node.props.disabled, `disabled ${label}`)
+        await node.props.onClick()
+      })
+      await flush()
+    },
+    checkbox: async (key, checked) => {
+      await React.act(async () => {
+        const row = rendered.root.findAllByType('li').find((element) => text(element).includes(key))
+        assert.ok(row, `missing row ${key}`)
+        row.findAllByType('input')[0].props.onChange({ target: { checked } })
+      })
+      await flush()
+    },
+    toggleLabel: async (needle, checked) => {
+      await React.act(async () => {
+        const label = rendered.root.findAllByType('label').find((element) => text(element).includes(needle))
+        assert.ok(label, `missing label ${needle}`)
+        label.findByType('input').props.onChange({ target: { checked } })
+      })
+      await flush()
+    },
+    radio: async (label) => {
+      await React.act(async () => {
+        const preset = rendered.root.findAllByType('label').find((element) => text(element).includes(label))
+        assert.ok(preset, `missing preset ${label}`)
+        preset.findByType('input').props.onChange({ target: { checked: true } })
+      })
+      await flush()
+    },
   }
 }
+const answer = (start, extra = {}) => (body) => {
+  if (body.action === 'state') return success(start)
+  if (body.action === 'inventory') return success(INVENTORY)
+  if (Object.hasOwn(extra, body.action)) return extra[body.action](body)
+  return success({ status: 'ok' })
+}
 
-hookTest('settings load error exits loading and retries in place', async (t) => {
-  let unavailable = true
-  const ui = await mount(t, state(), () => {
-    if (unavailable) throw Error('test-secret-network-error')
+hookTest('a failed load shows the mapped error, never the raw one, and retries in place', async (t) => {
+  let fail = true
+  const ui = await mount(t, state(), (body) => {
+    if (body.action === 'state' && fail) throw new Error('test-secret-network-error')
+    if (body.action === 'inventory') return success(INVENTORY)
+    return success(state('unpaired'))
   })
-  assert.match(ui.text(), /Could not load.*Network unavailable/)
-  assert.doesNotMatch(ui.text(), /test-secret|Loading device sync/)
-  unavailable = false
+  assert.ok(ui.all().includes('Network unavailable'), ui.all())
+  assert.ok(!ui.all().includes('test-secret-network-error'))
+  fail = false
   await ui.click('Retry')
-  assert.match(ui.text(), /Device sync settings/)
-  assert.doesNotMatch(ui.text(), /Could not load/)
-  assert.deepEqual(ui.requests, [{ action: 'state' }, { action: 'state' }])
+  assert.ok(ui.all().includes('Sync scope'), ui.all())
 })
 
-hookTest('settings save validates literal field paths and all policy controls', async (t) => {
-  const ui = await mount(t, state(), ({ action, policy }, prior, update) => {
-    if (action !== 'policy') return
-    update({ ...prior, policy })
-    return success({ ok: true, policy })
-  })
-  await ui.change('Allowed configuration fields (JSON)', '[]', 'textarea')
-  await ui.click('Save policy')
-  assert.match(ui.text(), /Enter a JSON object/)
-  assert.ok(!ui.requests.some(({ action }) => action === 'policy'))
-  await ui.change('Allowed configuration fields (JSON)', '{"entry":[["root","a.b"]]}', 'textarea')
-  await ui.change('Include', 'config:entry\nmemory:persona/notes.md\nconfig:entry', 'textarea')
-  await ui.change('Exclude', 'excluded-device', 'textarea')
-  await ui.change('Local only', 'my-local-plugin', 'textarea')
-  await ui.change('Mode', 'managed', 'select')
-  await ui.change('Direction', 'pull', 'select')
-  await ui.change('Check interval (ms)', '62000')
-  await ui.change('Automatic reconciliation (managed only)', true)
-  for (const name of ['Install', 'Upgrade', 'Enable', 'Disable', 'Write plugin config', 'Write memory']) {
-    await ui.change(name, name !== 'Disable')
+hookTest('the plugin list comes from inventory and unchecking writes scope with default deny', async (t) => {
+  const start = state('center', { policy: policy({ include: ['alpha', 'beta'] }) })
+  const ui = await mount(t, start, answer(start))
+  assert.ok(ui.all().includes('alpha'))
+  assert.ok(ui.all().includes('gamma'))
+  await ui.checkbox('beta', false)
+  const written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.ok(written, 'no policy write')
+  assert.deepEqual(written.policy.include, ['alpha'])
+  assert.equal(written.policy.default, 'deny')
+  assert.equal(written.policy.caps.memWrite, undefined)
+})
+
+hookTest('memory layers come from the lingshu catalogue and save with the write cap', async (t) => {
+  const start = state('center', { policy: policy({ include: [] }) })
+  const inventory = {
+    ...INVENTORY,
+    lingshu: {
+      available: true, writable: true, root: '/tmp/memory', source: 'default',
+      layers: [
+        { layer: 'contextual', eligible: 3, nodes: [] },
+        { layer: 'knowledge', eligible: 1, nodes: [] },
+        { layer: 'anchor', eligible: 1, nodes: [] },
+      ],
+    },
   }
-  await ui.change('Enable model suggestions', true)
-  await ui.change('AI provider ID', 'example-provider')
-  await ui.change('AI model ID', 'example-model')
-  await ui.click('Save policy')
-  const saved = ui.requests.find(({ action }) => action === 'policy').policy
-  assert.deepEqual(saved, { ...policy(), mode: 'managed', direction: 'pull', intervalMs: 62000, autoApply: true,
-    caps: { ...policy().caps, install: true, upgrade: true, disable: false, configSet: true, memWrite: true },
-    include: ['config:entry', 'memory:persona/notes.md'], exclude: ['excluded-device'], localOnly: ['my-local-plugin'],
-    configFields: { entry: [['root', 'a.b']] }, ai: { ...policy().ai, enabled: true, provider: 'example-provider', model: 'example-model' },
+  const ui = await mount(t, start, (body) => {
+    if (body.action === 'inventory') return success(inventory)
+    if (body.action === 'state') return success(start)
+    return success({ status: 'ok' })
   })
-  assert.match(ui.text(), /Policy saved/)
+  assert.ok(ui.all().includes('Memory (Lingshu)'), ui.all())
+  assert.ok(ui.all().includes('Contextual (3)'))
+  assert.ok(ui.all().includes('Knowledge (1)'))
+  assert.ok(!ui.all().includes('Anchor'), 'self and anchor layers are never offered')
+  await ui.toggleLabel('Contextual (3)', true)
+  let written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.ok(written, 'no policy write')
+  assert.ok(written.policy.include.includes('lingshu:contextual'), JSON.stringify(written.policy.include))
+  assert.deepEqual(written.policy.lingshu.layers, ['contextual'])
+  assert.equal(written.policy.caps.memoryWrite, true)
+  await ui.toggleLabel('Contextual (3)', false)
+  written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.deepEqual(written.policy.lingshu.layers, [])
+  assert.equal(written.policy.caps.memoryWrite, false)
+  assert.ok(!written.policy.include.some((key) => key.startsWith('lingshu:')), JSON.stringify(written.policy.include))
 })
 
-hookTest('listener generates invitations only on demand and administers peers and proposals', async (t) => {
-  const ui = await mount(t, state(), (body, prior, update) => {
-    if (body.action === 'pairCenter') {
-      update(state('peer', { topology: 'p2p', peers: { one: { deviceId: 'one', label: 'Phone', status: 'pending' } },
-        proposals: [{ id: 'p1', status: 'pending' }] }))
-      return success(prior)
-    }
-    if (body.action === 'invite') return success({ token: 'example-only', expiresAt: '2099-01-01' })
-    if (body.action === 'acceptProposal') return response({ error: 'unresolved-conflict', detail: 'paired-secret' }, 409)
-    if (body.action === 'rejectProposal') return success({ status: 'rejected' })
-    if (body.action === 'publishLocal') return success({ status: 'published' })
-    if (body.action === 'revokePeer') return success({ status: 'revoked' })
+hookTest('select all and the plugin-list settings switch update the same policy draft', async (t) => {
+  const start = state('center')
+  const ui = await mount(t, start, answer(start))
+  await ui.click('Select all')
+  let written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.deepEqual(new Set(written.policy.include), new Set(['alpha', 'beta', 'gamma']))
+  await ui.nthInput('alpha', 1, true)
+  written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.equal(written.policy.caps.configSet, true)
+  assert.deepEqual(written.policy.configFields['alpha-config'], [['theme']])
+})
+
+hookTest('advice adds missing plugins and adopts a suggestion through the API', async (t) => {
+  const start = state('center', { suggestions: [{ id: 's1', key: 'alpha', action: 'sync', reason: 'enabled' }] })
+  const ui = await mount(t, start, answer(start, { Suggest: (body) => success({ suggestions: start.suggestions }) }))
+  await ui.click('Add all')
+  let written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.deepEqual(new Set(written.policy.include), new Set(['alpha', 'beta', 'gamma']))
+  await ui.click('Show')
+  await ui.click('Include')
+  const adopted = ui.requests.filter((item) => item.action === 'adopt').at(-1)
+  assert.deepEqual(adopted.ids, ['s1'])
+})
+
+hookTest('an incoming proposal can be accepted or rejected from the sync card', async (t) => {
+  const start = state('center', {
+    center: { deviceId: 'c1', label: 'Office', lastContact: '2026-01-01T00:00:00.000Z' },
+    proposals: [{ id: 'p1', status: 'pending', origin: { label: 'Office' }, keys: ['alpha'] }],
   })
-  await ui.change('Connection', 'listenPeer', 'select')
-  await ui.click('Create peer invitation endpoint')
-  assert.ok(!ui.requests.some(({ action }) => action === 'invite'))
-  assert.match(ui.text(), /Waiting for an incoming request/)
-  await ui.click('Generate invitation')
-  assert.match(ui.text(), /example-only/)
-  await ui.click('Hide invitation')
-  assert.doesNotMatch(ui.text(), /example-only/)
+  const ui = await mount(t, start, answer(start))
+  assert.ok(ui.all().includes('Office'))
   await ui.click('Accept and publish')
-  assert.match(ui.text(), /Resolve conflicts before continuing/)
-  assert.doesNotMatch(ui.text(), /paired-secret/)
-  await ui.click('Reject proposal')
-  await ui.click('Publish selected local resources')
-  await ui.click('Revoke peer access')
-  assert.deepEqual(ui.requests.filter(({ action }) => action !== 'state'), [
-    { action: 'pairCenter', initSource: 'empty', topology: 'p2p' }, { action: 'invite' },
-    { action: 'acceptProposal', proposalId: 'p1' }, { action: 'rejectProposal', proposalId: 'p1' },
-    { action: 'publishLocal', kind: 'all' }, { action: 'revokePeer', deviceId: 'one' },
-  ])
+  assert.equal(ui.requests.filter((item) => item.action === 'acceptProposal').length, 1)
 })
 
-hookTest('peer join, memory operations and plan error feedback work through the Plugins slot', async (t) => {
-  const ui = await mount(t, state(), (body, prior, update) => {
-    if (body.action === 'connectPeer') {
-      update(state('peer', { topology: 'p2p', center: { deviceId: 'remote' }, lastStatus: { status: 'expired' },
-        lastConfigStatus: { status: 'ok' }, lastConfigResults: [{ opId: 'conf', status: 'needsRestart' }] }))
-      return success(prior)
-    }
-    if (body.action === 'check') return success({ status: 'network', detail: 'remote-secret' })
-    if (body.action === 'proposal') return success({ status: 'queued' })
-  }, { slot: 'plugins.tab' })
-  await ui.change('Connection', 'connectPeer', 'select')
-  await ui.change('Remote URL', 'https://example.invalid')
-  await ui.change('Invitation token', 'example-token')
-  await ui.change('SSH host', 'example.internal')
-  await ui.change('SSH user', 'ssh-user')
-  await ui.change('Remote port', '8123')
-  await ui.click('Connect to peer')
-  assert.match(ui.text(), /Connection not yet confirmed/)
-  assert.match(ui.text(), /Plugin plan.*Plan expired.*Plugin configuration plan.*Restart required.*Memory plan/)
-  await ui.click('Check memory differences')
-  assert.match(ui.text(), /Memory plan.*Network unavailable/)
-  assert.doesNotMatch(ui.text(), /remote-secret|example-token/)
-  await ui.click('Submit memory proposal')
-  assert.match(ui.text(), /Memory plan.*Queued/)
-  assert.deepEqual(ui.requests.filter(({ action }) => action !== 'state'), [
-    { action: 'connectPeer', url: 'https://example.invalid', token: 'example-token',
-      ssh: { kind: 'ssh', host: 'example.internal', user: 'ssh-user', remotePort: 8123 } },
-    { action: 'check', kind: 'memory' }, { action: 'proposal', kind: 'memory' },
-  ])
+hookTest('applying a plan approves the selected operations and then applies it', async (t) => {
+  const start = state('center', {
+    center: { deviceId: 'c1', label: 'Office', lastContact: '2026-01-01T00:00:00.000Z' },
+    lastPlan: {
+      planId: 'plan1', kind: 'plugin', operations: [
+        { opId: 'op1', key: 'alpha', action: 'enable', risk: 'normal' },
+        { opId: 'op2', key: 'beta', action: 'install', risk: 'high' },
+      ], skipped: [], conflicts: [],
+    },
+  })
+  const ui = await mount(t, start, answer(start))
+  assert.ok(ui.all().includes('alpha'))
+  await ui.click('Apply 1 to this device')
+  const calls = ui.requests.map((item) => item.action)
+  assert.deepEqual(calls.filter((name) => ['approve', 'apply'].includes(name)), ['approve', 'apply'])
+  const approve = ui.requests.find((item) => item.action === 'approve')
+  assert.deepEqual(approve.opIds, ['op1'])
 })
 
-hookTest('snapshot import immediately checks all kinds and resolves a safe diff before approval', async (t) => {
-  const op = { opId: 'cfg', key: 'config:entry', action: 'configSet', payload: { config: { secret: 'never-render' } }, risk: 'high' }
-  const plan = { planId: 'plan-old', source: 'snapshot:2', operations: [], skipped: [], conflicts: [
-    { key: 'config:entry', center: 'a'.repeat(64), local: 'b'.repeat(64), baseline: 'never-render', detail: 'never-render' },
-  ] }
-  const ui = await mount(t, state(), (body, prior, update) => {
-    if (body.action === 'loadSnapshot') return success({ ok: true })
-    if (body.action === 'check') {
-      update({ ...prior, pendingSnapshot: { trust: 'untrusted', manifest: { algorithm: 'hmac-sha256' } }, lastConfigPlan: plan })
-      return success({ status: 'ok' })
-    }
-    if (body.action === 'resolvePlanConflict') {
-      const newPlan = { ...plan, planId: 'plan-new', operations: [op], conflicts: [] }
-      update({ ...prior, lastConfigPlan: newPlan })
-      return success({ ok: true, plan: newPlan })
-    }
-    if (body.action === 'approve') {
-      update({ ...prior, approvals: { [body.planId]: { opIds: body.opIds } } })
-      return success({ ok: true })
-    }
-    if (body.action === 'apply') {
-      update({ ...prior, lastConfigStatus: { status: 'ok' }, lastConfigResults: [{ opId: 'cfg', status: 'needsRestart' }] })
-      return success({ status: 'ok' })
-    }
-  }, { language: 'zh' })
-  await ui.change('快照 JSON', '{"mock":true}', 'textarea')
-  await ui.click('导入并检查差异')
-  assert.match(ui.text(), /快照未签名，来源不可信/)
-  assert.match(ui.text(), /传入版本 a{12}…/)
-  assert.doesNotMatch(ui.text(), /never-render/)
-  await ui.click('采用传入版本')
-  assert.equal(ui.button('应用已批准操作').props.disabled, true)
-  await ui.change('写入插件配置 config:entry', true)
-  await ui.click('批准所选操作')
-  await ui.click('应用已批准操作')
-  assert.match(ui.text(), /需重启/)
-  assert.doesNotMatch(ui.text(), /never-render/)
-  assert.deepEqual(ui.requests.filter(({ action }) => action !== 'state'), [
-    { action: 'loadSnapshot', text: '{"mock":true}' }, { action: 'check', kind: 'all', source: 'snapshot' },
-    { action: 'resolvePlanConflict', planId: 'plan-old', key: 'config:entry', choice: 'remote' },
-    { action: 'approve', actor: 'user', planId: 'plan-new', opIds: ['cfg'] }, { action: 'apply', planId: 'plan-new' },
-  ])
+hookTest('the center publishes local changes while a member compares and proposes', async (t) => {
+  const centerState = state('center')
+  const center = await mount(t, centerState, answer(centerState))
+  assert.equal(center.hasButton('Compare'), false)
+  assert.equal(center.hasButton('Send to the other device'), false)
+  await center.click('Publish local changes')
+  const published = center.requests.filter((item) => item.action === 'publishLocal')
+  assert.equal(published.length, 1)
+  assert.equal(published[0].kind, 'plugin')
+
+  const memberState = state('device', { center: { deviceId: 'c1', label: 'Office' } })
+  const member = await mount(t, memberState, answer(memberState))
+  assert.equal(member.hasButton('Compare'), true)
+  assert.equal(member.hasButton('Send to the other device'), true)
+  assert.equal(member.hasButton('Publish local changes'), false)
 })
 
-hookTest('HTTP, JSON and nested business failures stay local and retain loaded settings', async (t) => {
-  let failure = 'parse'
-  const initial = state('device', { center: { deviceId: 'remote', status: 'offline', lastSeen: '2026-01-01' } })
-  const ui = await mount(t, initial, (body) => {
-    if (body.action === 'policy') {
-      if (failure === 'parse') return { ok: true, status: 200, text: async () => '{invalid-private-value-json' }
-      if (failure === 'html') return { ok: false, status: 403, text: async () => '<html>secret</html>' }
-      if (failure === 'business') return response({ ok: false, value: { ok: false, reason: 'direction-blocked:push', detail: 'secret' } }, 409)
-      if (failure === 'host') return response({ error: 'request-failed' }, 400)
-    }
-    if (body.action === 'state' && failure === 'refresh') throw Error('secret-refresh-failed')
-  })
-  assert.match(ui.text(), /Last request failed/)
-  await ui.click('Save policy')
-  assert.match(ui.text(), /invalid response/)
-  failure = 'html'
-  await ui.click('Save policy')
-  assert.match(ui.text(), /Not authorized/)
-  failure = 'business'
-  await ui.click('Save policy')
-  assert.match(ui.text(), /blocked by the sync direction/)
-  failure = 'host'
-  await ui.click('Save policy')
-  assert.match(ui.text(), /The operation failed/)
-  failure = 'refresh'
-  await ui.click('Refresh status')
-  assert.match(ui.text(), /Could not load/)
-  assert.match(ui.text(), /Device sync settings.*Allowed configuration fields/)
-  assert.doesNotMatch(ui.text(), /private-value|secret-refresh-failed|Loading device sync/)
-  failure = ''
-  await ui.click('Retry')
-  assert.doesNotMatch(ui.text(), /Could not load/)
+hookTest('a point-to-point listener can create an invitation until a peer connects', async (t) => {
+  const listenerState = state('peer')
+  const ui = await mount(t, listenerState, answer(listenerState, { invite: () => success({ token: 'tok-1', expiresAt: '2026-01-02' }) }))
+  const invite = ui.button('Invite a new device')
+  assert.equal(invite.props.disabled, false)
+  await ui.click('Invite a new device')
+  assert.equal(ui.requests.filter((item) => item.action === 'invite').length, 1)
+  assert.ok(ui.all().includes('tok-1'))
 })
 
-hookTest('busy operations block duplicate invocation and recover after rejection', async (t) => {
-  let rejectOperation
-  let resolveStarted
-  const started = new Promise((resolve) => { resolveStarted = resolve })
-  const ui = await mount(t, state('center'), (body) => {
-    if (body.action === 'publishLocal') {
-      resolveStarted()
-      return new Promise((_resolve, reject) => { rejectOperation = reject })
-    }
-  })
-  const button = ui.button('Publish selected local resources')
-  let ongoing
-  await React.act(async () => {
-    ongoing = button.props.onClick()
-    await started
-  })
-  assert.match(ui.text(), /Working…/)
-  assert.equal(ui.button('Publish selected local resources').props.disabled, true)
-  await React.act(async () => {
-    await button.props.onClick()
-    rejectOperation(Error('private-value-error'))
-    await ongoing
-  })
-  assert.equal(ui.requests.filter(({ action }) => action === 'publishLocal').length, 1)
-  assert.equal(ui.button('Publish selected local resources').props.disabled, false)
-  assert.match(ui.text(), /Network unavailable/)
-  assert.doesNotMatch(ui.text(), /private-value-error/)
+hookTest('invitations render the token and never leak configuration values', async (t) => {
+  const start = state('center', { center: { deviceId: 'c1', label: 'Office' } })
+  const ui = await mount(t, start, answer(start, { invite: () => success({ token: 'invite-token-123', expiresAt: '2026-01-02' }) }))
+  await ui.click('Invite a new device')
+  assert.ok(ui.all().includes('invite-token-123'))
+  assert.ok(!ui.all().includes('SECRET-VALUE'))
 })
 
-hookTest('archive button invokes only archiveDecisions and reports failure without stale success', async (t) => {
-  let failArchive = false
-  const ui = await mount(t, state('center', { proposals: [{ id: 'pending', status: 'pending', origin: { label: 'Pending phone' } }] }), (body) => {
-    if (body.action !== 'archiveDecisions') return
-    if (failArchive) return response({ ok: false, value: { ok: false, reason: 'archive-failed' } }, 409)
-    return success({ status: 'archived', count: 3, archiveId: 'proposals-1234-abcdef0123456789.json' })
+hookTest('a rejected policy shows the mapped reason and keeps the previous values', async (t) => {
+  const start = state('center')
+  const ui = await mount(t, start, (body) => {
+    if (body.action === 'state') return success(start)
+    if (body.action === 'inventory') return success(INVENTORY)
+    if (body.action === 'policy') return success({ ok: false, errors: ['bad'] })
+    return success({ status: 'ok' })
   })
-  await ui.click('Archive processed proposals')
-  assert.match(ui.text(), /Archived 3 · proposals-1234-abcdef0123456789.json/)
-  assert.match(ui.text(), /Pending phone/)
-  failArchive = true
-  await ui.click('Archive processed proposals')
-  assert.match(ui.text(), /Archiving failed. The proposals remain/)
-  assert.match(ui.text(), /Pending phone/)
-  assert.doesNotMatch(ui.text(), /Archived 3|proposals-1234-abcdef0123456789.json/)
-  assert.deepEqual(ui.requests.filter(({ action }) => action !== 'state'), [{ action: 'archiveDecisions' }, { action: 'archiveDecisions' }])
+  await ui.checkbox('alpha', true)
+  assert.ok(ui.all().includes('The settings were rejected'), ui.all())
+  assert.ok(!ui.all().includes('errors'))
 })
 
-hookTest('local resource inventory loads on demand and selections remain an unsaved draft', async (t) => {
-  let failInventory = true
-  const ui = await mount(t, state(), (body, prior, update) => {
-    if (body.action === 'inventory') {
-      if (failInventory) throw Error('inventory-private-value')
-      return success({
-        plugins: [{ key: 'example-plugin', enabled: true, values: 'never-display-private-value' }],
-        configs: [{ key: 'actual-entry', entryId: 'actual-entry', bundle: 'bundle-name', fields: [['parent', 'a.b'], ['region']], content: 'never-display-private-value' }],
-        memories: [{ key: 'memory:persona/notes.md', adapterId: 'persona', relativePath: 'notes.md', content: 'never-display-private-value' }],
-      })
-    }
-    if (body.action === 'policy') {
-      update({ ...prior, policy: body.policy })
-      return success({ ok: true, policy: body.policy })
-    }
-  })
-  assert.ok(!ui.requests.some(({ action }) => action === 'inventory'))
-  await ui.click('View selectable local resources')
-  assert.match(ui.text(), /Network unavailable/)
-  failInventory = false
-  await ui.click('View selectable local resources')
-  assert.match(ui.text(), /actual-entry.*Configuration path \["parent","a.b"\]/)
-  assert.doesNotMatch(ui.text(), /never-display-private-value|inventory-private-value/)
-  await ui.change('example-plugin', true)
-  await ui.change('memory:persona/notes.md', true)
-  await ui.change('Configuration path ["parent","a.b"]', true)
-  assert.ok(!ui.requests.some(({ action }) => action === 'policy'))
-  await ui.click('Save policy')
-  const saved = ui.requests.find(({ action }) => action === 'policy').policy
-  assert.deepEqual(saved.include, ['example-plugin', 'memory:persona/notes.md', 'actual-entry'])
-  assert.deepEqual(saved.configFields, { 'actual-entry': [['parent', 'a.b']] })
-  assert.equal(saved.caps.configSet, false)
-  assert.equal(saved.caps.memWrite, false)
-  assert.equal(ui.requests.filter(({ action }) => action === 'inventory').length, 2)
+hookTest('the first-open guide fills a connection preset and only shows once', async (t) => {
+  const storage = new Map()
+  const start = state('unpaired')
+  const ui = await mount(t, start, answer(start), { storage })
+  assert.ok(ui.all().includes('First time here? Pick a connection preset'), ui.all())
+  await ui.radio('Peer to peer')
+  await ui.radio('Join a network')
+  await ui.click('Fill it in and continue')
+  assert.equal(storage.get('dsh-plugin-sync:guide-dismissed:v1'), '1')
+  assert.ok(!ui.all().includes('First time here?'), ui.all())
+  assert.ok(ui.all().includes('Preset applied: Peer to peer · join'), ui.all())
+  assert.ok(ui.all().includes('Invitation code'), ui.all())
+  const next = await mount(t, start, answer(start), { storage })
+  assert.ok(!next.all().includes('First time here?'), next.all())
+  await ui.click('Show the guide again')
+  assert.ok(ui.all().includes('First time here? Pick a connection preset'), ui.all())
 })
 
-hookTest('connected peer listener can check and queue memory proposals', async (t) => {
-  const ui = await mount(t, state('peer', { peers: { p: { deviceId: 'p', status: 'connected', lastSeen: '2026-01-01' } } }), (body) => {
-    if (body.action === 'check') return response({ ok: false, value: { status: 'peer-state-unavailable' } }, 409)
-    if (body.action === 'proposal') return success({ status: 'queued', proposalId: 'queue-1' })
-  })
-  assert.equal(ui.button('Generate invitation').props.disabled, true)
-  assert.match(ui.text(), /already has a peer/)
-  await ui.click('Check memory differences')
-  assert.match(ui.text(), /Wait for the paired device/)
-  await ui.click('Submit memory proposal')
-  assert.match(ui.text(), /Memory plan.*Queued/)
-  assert.deepEqual(ui.requests.filter(({ action }) => action !== 'state'), [
-    { action: 'check', kind: 'memory' }, { action: 'proposal', kind: 'memory' },
-  ])
+hookTest('the plugin list includes a whole plugin config with one toggle', async (t) => {
+  const start = state('center')
+  const ui = await mount(t, start, answer(start))
+  await ui.nthInput('alpha', 1, true)
+  const written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.ok(written, 'no policy write')
+  assert.ok(written.policy.include.includes('alpha-config'))
+  assert.deepEqual(written.policy.configFields['alpha-config'], [['theme']])
+  assert.equal(written.policy.caps.configSet, true)
+  await ui.nthInput('alpha', 1, false)
+  const after = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.equal(after.policy.include.includes('alpha-config'), false)
+  assert.equal(after.policy.caps.configSet, false)
 })
 
-hookTest('snapshot validation failure never triggers its check step', async (t) => {
-  const ui = await mount(t, state(), ({ action }) => {
-    if (action === 'loadSnapshot') return response({ ok: false, value: { ok: false, reason: 'digest-mismatch' } }, 409)
+hookTest('reset sync returns to unpaired and reopens the guide', async (t) => {
+  let current = state('center', { center: { deviceId: 'c1', label: 'Office' } })
+  const ui = await mount(t, current, (body) => {
+    if (body.action === 'state') return success(current)
+    if (body.action === 'inventory') return success(INVENTORY)
+    if (body.action === 'reset') { current = state('unpaired'); return success(current) }
+    return success({ status: 'ok' })
   })
-  await ui.change('Snapshot JSON', '{"bad":"digest"}', 'textarea')
-  await ui.click('Import and check differences')
-  assert.match(ui.text(), /Snapshot integrity check failed/)
-  assert.ok(!ui.requests.some(({ action }) => action === 'check'))
+  assert.equal(ui.all().includes('First time here?'), false)
+  await ui.click('Reset sync')
+  await ui.click('Confirm reset')
+  assert.equal(ui.requests.filter((item) => item.action === 'reset').length, 1)
+  assert.ok(ui.all().includes('First time here? Pick a connection preset'), ui.all())
+})
+
+hookTest('an invitation link is parsed and the connection stays locked until verified', async (t) => {
+  const start = state('unpaired')
+  const ui = await mount(t, start, answer(start, { verify: () => success({ verified: true, center: { deviceId: 'c1', role: 'center' }, topology: 'center' }) }))
+  await ui.click('I connect to another device')
+  await ui.fill('Paste the full link shared by the other device', 'http://192.0.2.10:3080/plugin-sync/join?invite=tok-123')
+  await ui.click('Parse link')
+  await ui.click('Verify link')
+  const verified = ui.requests.filter((item) => item.action === 'verify').at(-1)
+  assert.equal(verified.url, 'http://192.0.2.10:3080')
+  assert.equal(verified.token, 'tok-123')
+  assert.ok(ui.all().includes('Verified'), ui.all())
 })

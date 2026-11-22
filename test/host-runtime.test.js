@@ -24,6 +24,22 @@ test('profile and credential identities isolate home, profile and caller key', a
   await x.putSecret('center', 'one'); await x.putSecret('snapshot', 'two'); await y.putSecret('center', 'three')
   assert.equal(await x.getSecret('center'), 'one'); assert.equal(await x.getSecret('snapshot'), 'two'); assert.equal(await y.getSecret('center'), 'three')
 })
+test('credential adapter deletes scoped records and tolerates a service without deleteRecord', async () => {
+  const currentScope = scope()
+  const records = new Map([[credentialAddress(currentScope, 'center'), { key: 'stored-secret' }]])
+  const ctx = { get: () => ({
+    readRecord: async key => records.get(key),
+    modifyRecord: async () => {},
+    deleteRecord: async key => { records.delete(key) },
+  }) }
+  const adapter = createCredentialAdapter(ctx, currentScope)
+  assert.equal(await adapter.getSecret('center'), 'stored-secret')
+  await adapter.deleteSecret('center')
+  assert.equal(await adapter.getSecret('center'), null)
+  const limited = { get: () => ({ readRecord: async () => ({ key: 'still-there' }) }) }
+  await createCredentialAdapter(limited, currentScope).deleteSecret('center')
+  assert.equal(await createCredentialAdapter(limited, currentScope).getSecret('center'), 'still-there')
+})
 test('store fails closed, refuses symlinks, writes private compact atomic snapshots', () => {
   const dir = path.join(temporary(), 'state'), store = createStore(dir), file = path.join(dir, 'state.json')
   assert.equal(store.read(), null)
@@ -103,11 +119,11 @@ test('local resource catalogue contains only selectable addresses and no values'
   const catalogue = await resourceCatalogue({
     collectInventory: async () => [{ key: 'example', enabled: true, source: { private: 'never-return' } }],
     collectConfig: async () => [{ key: 'entry', entryId: 'entry', bundle: 'example', config: { nested: { value: 'never-return', password: 'never-return' }, 'literal.key': true } }],
-    collectMemory: async () => ({ records: [{ key: 'memory:note.md', adapterId: 'memory', relativePath: 'note.md', content: 'never-return' }] }),
   })
   assert.equal(JSON.stringify(catalogue).includes('never-return'), false)
+  assert.deepEqual(catalogue.plugins, [{ key: 'example', enabled: true }])
   assert.deepEqual(catalogue.configs[0].fields, [['nested', 'value'], ['literal.key']])
-  assert.deepEqual(catalogue.memories, [{ key: 'memory:note.md', adapterId: 'memory', relativePath: 'note.md' }])
+  assert.equal('memories' in catalogue, false)
 })
 test('manual proposal archival writes and verifies a private backup before queue removal', () => {
   const currentScope = scope()
@@ -136,10 +152,15 @@ test('host activation and real HTTP harness preserve auth, origin, exact routes 
     pluginManager: { listBundles: async () => [] }, configEditor: { configuration: () => [] }, credentials: {},
   }
   const ctx = { get(name) { if (!inject.includes(name)) throw new Error(`undeclared-service:${name}`); return services[name] }, inject() {}, effect(fn) { effects.push(fn()) } }
-  apply(ctx)
+  // The merged lingshu-mute host returns an async install promise; await it so
+  // the test does not end with a pending promise.
+  await apply(ctx)
   t.after(() => effects.forEach(clean => typeof clean === 'function' && clean()))
-  assert.equal(registrations.length, 1)
-  const server = http.createServer(registrations[0].handler)
+  // The merged lingshu-mute host registers its own prefix; the sync prefix must
+  // still be the one this test drives.
+  const syncRoute = registrations.find((entry) => entry.path === '/plugin-sync')
+  assert.ok(syncRoute && typeof syncRoute.handler === 'function')
+  const server = http.createServer(syncRoute.handler)
   await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
   t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)) })
   const base = `http://127.0.0.1:${server.address().port}`
@@ -162,7 +183,11 @@ test('host activation and real HTTP harness preserve auth, origin, exact routes 
   assert.equal((await request('/plugin-sync/state', { deviceId: 5 })).status, 400)
   const secret = await request('/plugin-sync/api/action', { action: 'unknown-secret-test' }); assert.equal(secret.body.error, 'request-failed')
   assert.deepEqual(await toolRecords[0].execute({ action: 'autoSync' }), { ok: false, error: 'action-not-allowed-for-agent' })
-  const malformed = await new Promise(resolve => registrations[0].handler({ url: 'http://[', headers: {} }, { setHeader() {}, end(text) { resolve(JSON.parse(text)) } }))
+  const malformed = await new Promise(resolve => syncRoute.handler({ url: 'http://[', headers: {} }, { setHeader() {}, end(text) { resolve(JSON.parse(text)) } }))
   assert.equal(malformed.error, 'request-failed')
   const dir = profileScope(services.profileContext).dir; assert.equal(fs.existsSync(path.join(dir, 'state.json')), true)
+  const verify = await request('/plugin-sync/api/action', { action: 'verify', token: 'fake-token', url: 'http://192.0.2.10:3080' })
+  assert.equal(verify.status, 400); assert.equal(verify.body.error, 'request-failed')
+  const reset = await request('/plugin-sync/api/action', { action: 'reset' })
+  assert.equal(reset.status, 200); assert.equal(reset.body.value.identity.role, 'unpaired')
 })

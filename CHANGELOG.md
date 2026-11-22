@@ -1,5 +1,43 @@
 # 变更记录
 
+## 未发布
+
+- 建议卡按插件性质分类：普通插件仍建议「纳入同步」，设备专属插件（IM / 记忆 / 聊天类，账号或状态绑定本机）建议「留本机」且其设置不同步；系统/停用/已纳入规则不变。`analyzePlugins` 增加 `isDeviceLocal` 判定，`docs/USAGE.md` 同步说明。
+
+## 0.4.0 — 2026-11-21
+
+加入灵枢（LINGSHU / `@furongjun1999/dsh-memory`）记忆节点同步，作为第三类资源域；写入走灵枢自己的库层，不绕过复核闸。
+
+- 新资源域：`kind:'lingshuNode'`（`key` 为节点 id）、动作与能力 `memoryWrite`、状态槽 `expectedLingshu/lingshuBaselines/lastLingshuPlan/lastLingshuResults/lastLingshuStatus`；`policy.lingshu = {layers, maxSensitivity}`。旧状态加载时补齐槽位，默认 `layers: ['contextual','goals','unresolved']`、`maxSensitivity: 'internal'`、`memoryWrite: false`。
+- canonical 投影：节点 `.md` 的 front-matter 按「本机易变 / 派生 / 语义」分类，访问计数、`last_access`、`importance*`、`confidence`、`session`、`writer`、`harness`、证据计数、`merge_*`、`bucket*`、`consistency`、`untrusted*`、`protected/immutable`、`lifecycle_state`、`verification_state`、`sensitivity`、`edges` 都不参与跨端比较；`condition_space.time_window` 单独剔除。语义字段与正文逐字保留，两侧按同一投影比较，读数稳定。
+- 读取：层目录的受限扫描（深度 ≤3、单节点 ≤32 KiB、整批 ≤192 KiB、≤256 节点、拒绝软链/非普通文件/硬链/加密节点）。不读索引、日志、锁、`hippocampus/`、`trash/`、`_protected_history/`、`_keys.json`。
+- 写入：`lib/lingshu-bridge.py` 以子进程调 `MdCGSecure.add()`，继承本机未提供的字段，覆写时显式保留本机 `edges`，`sensitivity` 只对新节点上送，`consistency=False`；写入后读回做 canonical 比对，不一致即 `lingshu-verify-failed`。桥不可用时如实返回 `memory-bridge-unavailable`，不降级为裸写文件。
+- 安全：`evaluate()` 对 `lingshuNode` 要求显式纳入（层模式 `lingshu:<layer>` 或节点 id），并叠加层白名单与密级上限；导出侧复用灵枢 `data/policy.json` 的 `forbidden` 模式拦下疑似凭据。`memoryWrite` 永不自动应用，操作固定 `risk:'high'`。
+- 冲突与删除：双方都改 → `concurrent-lingshu-change`，默认保留本机，可由人工选择采用对方；对端缺席永不删除；快照不包含记忆节点。
+- 设置页：「同步范围」新增「记忆（灵枢）」块（按层勾选与节点数、桥不可用时禁用），「同步」里按作用域显示记忆计划卡；字典中英同步。
+- 测试：新增 9 项（投影稳定性与拒绝面、层/密级/禁写模式过滤、策略与计划器、中心-设备端到端、复核闸拒绝、真实 Python 桥写入与覆写保留 `edges`/`sensitivity`），全量 102 项通过；`check`、`check:public` 通过。
+- 真实宿主验证：两套隔离 `DSH_HOME` 实例（3997 中心 / 3996 设备）完成 46 个情景节点发布→检查→批准→应用，B 侧落盘 46 并建索引；重复检查 0 操作；A 单方面改文并发布后 B 侧报冲突且不覆盖；人工选「采用对方」后单项应用成功；知识层节点被灵枢拒写，插件报 `memory-needs-review` 且未落盘。B 侧用灵枢自身 `get()`/`search()` 能读到同步后的节点。
+- 同期合入独立插件 `lingshu-mute` 的宿主面（`lib/mute/`）：会话/工作区静音开关、`/mute` 命令与 `/plugins/lingshu-mute` 路由；其写入拦截对灵枢升级敏感，失败时降级为仅注入过滤。该合并的详细行为以源码注释与面板为准。
+- 未验证项：跨 WAN、Windows/macOS、灵枢复核通道可用时的知识层写入、长驻 Python worker 的收益（本版按批起进程）。
+
+## 0.3.0 — 2026-11-20
+
+移除记忆同步域，建议与设置页围绕插件/配置重做，范围语义改为白名单。
+
+- 移除记忆同步：删除 `lib/memory.js`、`memWrite` 能力、记忆资源类型、记忆计划/提案/快照字段和适配器读写。`RESOURCE_KINDS` 只剩 `plugin`、`pluginConfig`；远端 `kind:'memory'` 以 `unsupported resource kind` 拒绝。本插件不再读取、写入或导出任何记忆/人格文件；0.2.0 记录中的记忆同步条目已在本版移除。
+- 加载旧状态时自动迁移并落盘：删除 `expectedMemory`、`memoryBaselines`、`lastMemoryPlan/lastMemoryResults/lastMemoryStatus`、`pendingSnapshot.expectedMemory`、`caps.memWrite` 和带 `adapterId/relativePath` 的旧建议。旧状态不会因多余字段校验失败。
+- 建议改为扫插件：`analyzePlugins` 对系统插件给 `localOnly`、已停用给 `skip`、已启用给 `sync`、已在 `include` 里的不再建议；`suggest` 只写建议，`adopt` 由用户触发才写 `include`/`localOnly`。模型复核只接收插件元数据（key、enabled、kind）。
+- 设置页重做：顶部状态与暂停/恢复、建议置顶、同步范围（两个预设、方向、自动读取可搜索插件清单、勾选即保存、配置字段勾选、范围 JSON 本地导入/导出）、同步（按角色的「发布本机改动」或「看差异」「发给对方」、对方变更接受/拒绝、冲突、勾选后一次点击完成批准和应用）、连接（设备撤销、邀请、可选 SSH 隧道）、更多（快照、归档、最近活动）、高级折叠；界面改用宿主真实主题令牌并带降级值，避免变量缺失时卡片不渲染。
+- 同步范围改为白名单：设置页保存时固定写 `default:'deny'`，`mode` 随自动应用写 `managed`/`selective`；一个都不勾就不同步。旧版 `default:'allow'` 下清空 `include` 等于全同步的语义已消除。
+- 入口去重：面板只注册「插件 → 设备同步」，不再在左下角「设置」里重复放一份； locales 的展示描述同步更新。
+- 首次打开指引：未配对时按「中心 / 点对点」×「创建 / 接入」四种组合一键填好连接预设（高亮创建按钮或展开接入表单并选好对方类型），关闭状态记在本机 localStorage，可在「连接」卡重新打开。
+- 排版重做：顶部状态区 + 宽屏两列（左：建议/范围/同步，右：连接/更多）+ 底部高级；窄屏单列。文本输入框改用明显边框和聚焦外圈高亮。
+- 同步范围可在插件清单里一键设置：带配置条目的插件多一个「同步设置」勾选框，勾上即把该插件全部非密钥配置字段写入 `configFields` 并加入 `include`、开启 `configSet`；取消即移除。范围 JSON 导入/导出同步带上配置条目。按用户要求移除独立的「插件 + 配置」预设和配置项逐字段勾选界面，`configSet` 完全由「同步设置」勾选结果决定。
+- 「重置同步」：连接卡右上角新增带确认的重置，清除配对、对端、邀请与连接凭据并回到未配对，已勾选的同步范围保留，可重新选中心/点对点与网络；首次指引随之重新出现。首次指引增加「局域网 / SSH 隧道 / 公网」一档。
+- 配对流程改为网络适配 + token 验证：局域网允许明文 `http://`，公网用 HTTPS，SSH 走密钥隧道；主机侧生成含邀请码的邀请链接，接入侧粘贴链接->解析->「验证链接」（只读 hello 探测，不消费邀请）后才能连接。所有外发仍带 token。
+- 本地测试调整为 93 项全绿：新增 6 项后端验证/重置用例、3 项界面回归（整插件设置、重置、链接验证），并更新 HTTP 传输的 LAN 断言。CI 配置仍为 Node 22/24 矩阵。
+- 未验证项不变：没有真实付费模型调用、没有跨 WAN 实测、没有覆盖所有桌面端与移动端导航。
+
 ## 0.2.0 — 2026-11-19
 
 安全复核与首次独立 GitHub 包格式。

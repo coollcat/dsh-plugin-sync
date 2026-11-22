@@ -1,17 +1,12 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import fs from 'node:fs'
-import os from 'node:os'
-import path from 'node:path'
 import { EventEmitter } from 'node:events'
 import { projectConfig, mergeConfigFields, getPath, setPath } from '../lib/config.js'
 import { resourceHash, hash, validateResourceRecord } from '../lib/protocol.js'
 import { createTransport } from '../lib/transport.js'
 import { createSshTransport } from '../lib/ssh-transport.js'
 import { exportSnapshot, parseSnapshot } from '../lib/snapshot.js'
-import { collectMemory, writeMemory } from '../lib/memory.js'
 
-function fixture(t){const root=fs.mkdtempSync(path.join(os.tmpdir(),'sync-boundary-'));t.after(()=>fs.rmSync(root,{recursive:true,force:true}));const adapters=[{id:'memory',root:path.join(root,'memory'),extensions:['.md','.json'],maxBytes:4096}];fs.mkdirSync(adapters[0].root);return {root,adapters,dir:adapters[0].root}}
 const plugin=()=>{const record={kind:'plugin',key:'example-plugin',enabled:false,source:{type:'registry',package:'example-plugin',version:'1.0.0'}};return {...record,contentHash:resourceHash(record)}}
 
  test('config export includes only explicitly approved safe paths and preserves dotted array paths',()=>{
@@ -31,44 +26,15 @@ const plugin=()=>{const record={kind:'plugin',key:'example-plugin',enabled:false
   const credentialUrl=new URL('https://example.com');credentialUrl.username='user';credentialUrl.password='password'
   assert.deepEqual(projectConfig({url:credentialUrl.href,endpoint:'https://example.com/?token=fake'},[['url'],['endpoint']]),{})
  })
- test('owner sidecar symlink cannot mutate data or outside target',t=>{
-  const {root,adapters,dir}=fixture(t);fs.writeFileSync(path.join(dir,'note.md'),'local');const outside=path.join(root,'outside');fs.writeFileSync(outside,'owner-value');fs.symlinkSync(outside,path.join(dir,'note.md.owner'))
-  assert.throws(()=>writeMemory({home:root,adapters,adapterId:'memory',relativePath:'note.md',content:'remote',owner:'p'}),/symlink/)
-  assert.equal(fs.readFileSync(outside,'utf8'),'owner-value');assert.equal(fs.readFileSync(path.join(dir,'note.md'),'utf8'),'local')
- })
- test('adapter root symlink cannot be read or written; missing scans create no root',t=>{
-  const {root,adapters}=fixture(t);const outside=path.join(root,'outside');fs.mkdirSync(outside);fs.writeFileSync(path.join(outside,'private.md'),'hidden');const aliased=[{...adapters[0],root:path.join(root,'alias')}];fs.symlinkSync(outside,aliased[0].root)
-  assert.equal(collectMemory({home:root,adapters:aliased}).records.length,0)
-  assert.throws(()=>writeMemory({home:root,adapters:aliased,adapterId:'memory',relativePath:'x.md',content:'remote'}),/symlink/)
-  const missing=[{...adapters[0],root:path.join(root,'missing')}];assert.deepEqual(collectMemory({home:root,adapters:missing}).records,[]);assert.equal(fs.existsSync(missing[0].root),false)
- })
- test('another profile cannot scan or export a file claimed by a different memory owner',t=>{
-  const {root,adapters}=fixture(t)
-  writeMemory({home:root,adapters,adapterId:'memory',relativePath:'private.md',content:'profile-a-private-body',expectedHash:null,owner:'profile-a'})
-  const foreign=collectMemory({home:root,adapters,owner:'profile-b'})
-  assert.deepEqual(foreign.records,[]);assert.equal(foreign.skipped[0].reason,'owned-by-other-profile')
-  assert.equal(JSON.stringify(foreign).includes('profile-a-private-body'),false)
-  assert.equal(collectMemory({home:root,adapters,owner:'profile-a'}).records.length,1)
- })
- test('memory collection rejects hard links to a file outside the adapter root',t=>{
-  const {root,adapters,dir}=fixture(t);const outside=path.join(root,'private.md');fs.writeFileSync(outside,'outside-private-value');fs.linkSync(outside,path.join(dir,'linked.md'))
-  const scanned=collectMemory({home:root,adapters});assert.equal(scanned.records.length,0);assert.equal(scanned.skipped[0].reason,'hardlink-path-rejected')
- })
- test('memory writers enforce type, create baseline and independent profile ownership',t=>{
-  const {root,adapters,dir}=fixture(t);assert.throws(()=>writeMemory({home:root,adapters,adapterId:'memory',relativePath:'run.sh',content:'echo unsafe'}),/type/)
-  writeMemory({home:root,adapters,adapterId:'memory',relativePath:'new.md',content:'first',expectedHash:null,owner:'profile-a'})
-  assert.throws(()=>writeMemory({home:root,adapters,adapterId:'memory',relativePath:'new.md',content:'second',owner:'profile-b'}),/owned-by/)
-  assert.throws(()=>writeMemory({home:root,adapters,adapterId:'memory',relativePath:'new.md',content:'second',expectedHash:null,owner:'profile-a'}),/baseline/)
-  assert.equal(fs.readFileSync(path.join(dir,'new.md'),'utf8'),'first')
- })
  test('resource validation binds addresses to identities and actual payload hashes',()=>{
   const valid=plugin();assert.deepEqual(validateResourceRecord(valid),[])
   assert.ok(validateResourceRecord({...valid,source:{...valid.source,package:'@deepseek-ai/dsh'}}).length)
   assert.ok(validateResourceRecord({...valid,enabled:true}).some(x=>x.includes('Hash')))
-  assert.ok(validateResourceRecord({kind:'memory',key:'memory:other.md',adapterId:'memory',relativePath:'note.md',content:'x',schemaVersion:1,contentHash:hash('fake')}).length)
+  // The removed memory domain has no resource schema and must fail closed.
+  assert.deepEqual(validateResourceRecord({kind:'memory',key:'memory:other.md',adapterId:'memory',relativePath:'note.md',content:'x',schemaVersion:1,contentHash:hash('fake')}),['unsupported resource kind'])
  })
  test('offline import revalidates records even after attacker recomputes checksum',()=>{
-  const state={identity:{deviceId:'node-a',profileId:'a'},revision:{number:1,hash:'rev:1',clock:{}},expected:[plugin()],expectedConfig:[],expectedMemory:[]}
+  const state={identity:{deviceId:'node-a',profileId:'a'},revision:{number:1,hash:'rev:1',clock:{}},expected:[plugin()],expectedConfig:[]}
   const snapshot=exportSnapshot(state);assert.equal(parseSnapshot(JSON.stringify(snapshot)).trust,'untrusted')
   snapshot.expected[0].source.package='file:/etc/passwd';const {manifest,...body}=snapshot;snapshot.manifest.digest=hash(body)
   assert.equal(parseSnapshot(JSON.stringify(snapshot)).ok,false)
@@ -78,7 +44,9 @@ const plugin=()=>{const record={kind:'plugin',key:'example-plugin',enabled:false
   let options
   const transport=createTransport({fetchImpl:async(url,opts)=>{options=opts;return {ok:true,headers:new Headers(),text:async()=>JSON.stringify({error:'unauthorized'})}}})
   await assert.rejects(transport.send('http://127.0.0.1/state',{token:'fake-token'}),error=>error.code==='unauthorized');assert.equal(options.redirect,'error')
-  await assert.rejects(transport.send('http://203.0.113.1/state',{token:'fake-token'}),/HTTPS/)
+  // Plain HTTP to a non-loopback host is allowed for LAN pairing; the bearer token is the credential.
+  await assert.rejects(transport.send('http://203.0.113.1/state',{token:'fake-token'}),error=>error.code==='unauthorized')
+  await assert.rejects(transport.send('https://user@lan-host.local/state',{token:'fake-token'}),error=>error.code==='bad-url')
   const large=createTransport({fetchImpl:async()=>({ok:true,headers:new Headers({'content-length':String(600000)}),text:async()=>''})})
   await assert.rejects(large.send('http://127.0.0.1/state',{token:'fake-token'}),error=>error.code==='payload-too-large')
  })

@@ -1,25 +1,46 @@
 {
   "name": "@local/dsh-plugin-sync",
-  "version": "0.2.0",
+  "version": "0.4.0",
   "private": true,
   "type": "module",
   "main": "./index.js",
-  "description": "Policy-controlled DSH profile synchronization with local approval, configuration field allowlists and memory adapters",
+  "description": "Policy-controlled DSH profile synchronization with local approval, plugin scope allowlists, configuration field allowlists and Lingshu memory node sync",
   "repository": {
     "type": "git",
     "url": "https://github.com/coollcat/dsh-plugin-sync.git"
   },
-  "bugs": { "url": "https://github.com/coollcat/dsh-plugin-sync/issues" },
+  "bugs": {
+    "url": "https://github.com/coollcat/dsh-plugin-sync/issues"
+  },
   "license": "UNLICENSED",
-  "engines": { "node": ">=22.11.0", "dsh": ">=0.2.2-rc.3 <0.3.0" },
+  "engines": {
+    "node": ">=22.11.0",
+    "dsh": ">=0.2.2-rc.3 <0.3.0"
+  },
   "exports": {
     ".": "./index.js",
     "./client": "./client.js",
     "./locale/*.json": "./locale/*.json",
     "./icon": "./icon.svg"
   },
-  "files": ["index.js", "client.js", "cordis.patch.yml", "lib/*.js", "locale/*.json", "icon.svg", "README.md", "CHANGELOG.md", "SECURITY.md", "docs/*.md"],
-  "devDependencies": { "react": "19.2.0", "react-test-renderer": "19.2.0" },
+  "files": [
+    "index.js",
+    "client.js",
+    "cordis.patch.yml",
+    "lib/*.js",
+    "lib/*.py",
+    "locale/*.json",
+    "icon.svg",
+    "README.md",
+    "CHANGELOG.md",
+    "SECURITY.md",
+    "docs/*.md",
+    "lib/mute/*.js"
+  ],
+  "devDependencies": {
+    "react": "19.2.0",
+    "react-test-renderer": "19.2.0"
+  },
   "scripts": {
     "test": "node --test test/*.test.js",
     "check": "node scripts/check.mjs",
@@ -27,7 +48,15 @@
     "verify": "npm run check && npm run test && npm run check:public"
   },
   "dsh": {
-    "bundle": { "patch": "./cordis.patch.yml" },
-    "client": { "platform": "web", "immediately": true }
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": [
+        "@deepseek-ai/dsh-client-ui-conversation"
+      ]
+    }
   }
 }

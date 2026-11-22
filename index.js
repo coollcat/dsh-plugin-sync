@@ -1,12 +1,20 @@
 // Host half of the device sync plugin. All mutations go through the engine;
 // this file only adapts DSH services and exposes HTTP routes.
 
+import fs from 'node:fs'
+import path from 'node:path'
+
 import { createEngine } from './lib/engine.js'
 import { configRecord, projectConfig, mergeConfigFields, configHash, validFieldPath, isSecretKey } from './lib/config.js'
-import { collectMemory, writeMemory, getMemoryAdapters } from './lib/memory.js'
-import { hash, validateIdentity, validateChangeset } from './lib/protocol.js'
+import { hash, validateIdentity, validateChangeset, validateLingshuRecord, resourceHash, LINGSHU_LAYERS } from './lib/protocol.js'
 import { bearerFrom } from './lib/transport.js'
 import { profileScope, createStore, createHostAudit, createCredentialAdapter, archiveDecisions, unwrap, HostError, jsonRequestGate, readBody, businessStatus } from './lib/host-runtime.js'
+import { collectLingshu, lingshuCatalogue, resolveMemoryRoot, resolveBridge, canonicalNode, writeLingshu } from './lib/lingshu.js'
+// Merged in from the standalone `lingshu-mute` plugin (2026-11-21). Its apply()
+// installs the lingshu write gate, the /plugins/lingshu-mute HTTP surface and the
+// /mute command. All of it is effect-scoped to this plugin's ctx, so disposal on
+// recomposition tears the routes/hooks down with the sync plugin.
+import { apply as applyLingshuMute } from './lib/mute/index.js'
 
 export const inject = ['pluginManager', 'configEditor', 'webServer', 'credentials', 'connection', 'tools', 'profileContext']
 
@@ -75,8 +83,6 @@ export function createInventoryAdapter(ctx, scope) {
       const rows = addressableConfigRows(editor, bundles)
       return rows.map(({ entry, bundle }) => configRecord({ entryId: entry.options.id, bundle, config: entry.options.config ?? {} }))
     },
-    collectMemory: async () => collectMemory({ adapters: getMemoryAdapters(scope.home), home: scope.home, owner: scope.name }),
-    writeMemory: async (payload) => writeMemory({ ...payload, adapters: getMemoryAdapters(scope.home), home: scope.home, owner: scope.name }),
     async writeConfig({ entryId, bundle, config, fields, expectedHash }) {
       const editor = ctx.get('configEditor')
       if (!editor) throw new Error('config-editor-service-unavailable')
@@ -97,6 +103,74 @@ export function createInventoryAdapter(ctx, scope) {
       return { restartRequired: true, detail: 'configSet:saved' }
     },
   }
+}
+
+// Lingshu memory adapter. Reads are bounded filesystem scans (the node .md files
+// are Lingshu's only truth source). Writes always go through the Python brain so
+// node locks, field inheritance and the tiered review gate stay authoritative —
+// a raw byte write would be invisible to the running process until a rebuild.
+const MEMORY_LAYERS = LINGSHU_LAYERS.filter((layer) => !['self', 'anchor'].includes(layer))
+
+export function createLingshuAdapter(ctx, config = {}, getPolicy = () => null) {
+  const memory = resolveMemoryRoot({ configured: config.root ?? null })
+  const bridge = resolveBridge({
+    python: config.python ?? null, packagePath: config.packagePath ?? null,
+    profileDir: ctx.get('profileContext')?.dir ?? null,
+  })
+  const settings = () => {
+    const lingshu = getPolicy()?.lingshu ?? {}
+    const layers = Array.isArray(lingshu.layers)
+      ? lingshu.layers.filter((layer) => MEMORY_LAYERS.includes(layer))
+      : MEMORY_LAYERS.slice(0, 3)
+    return { layers, maxSensitivity: lingshu.maxSensitivity ?? 'internal' }
+  }
+  const status = () => ({
+    root: memory.root, source: memory.source, bridge: Boolean(bridge),
+    python: bridge?.python ?? null, packagePath: bridge?.packagePath ?? null,
+    writable: Boolean(bridge), scopeLayers: settings().layers, maxSensitivity: settings().maxSensitivity,
+  })
+  const adapter = {
+    lingshuStatus: status,
+    async collectLingshu() {
+      const { layers, maxSensitivity } = settings()
+      return collectLingshu({ root: memory.root, layers, maxSensitivity }).records
+    },
+    async lingshuCatalogue() {
+      const { layers, maxSensitivity } = settings()
+      return { ...status(), ...lingshuCatalogue({ root: memory.root, layers, maxSensitivity }) }
+    },
+    async writeLingshu(payload) {
+      if (!bridge) return { ok: false, reason: 'memory-bridge-unavailable' }
+      const record = { kind: 'lingshuNode', key: payload?.key, layer: payload?.layer, content: payload?.content, sensitivity: payload?.sensitivity, title: '' }
+      let contentHash
+      try { contentHash = resourceHash(record) } catch { return { ok: false, reason: 'memory-write-failed' } }
+      record.contentHash = contentHash
+      if (validateLingshuRecord(record).length) return { ok: false, reason: 'memory-write-failed' }
+      // The engine checked the baseline before dispatch; re-read inside the
+      // adapter so a write that raced another writer cannot overwrite it.
+      let currentHash = null
+      const file = path.join(memory.root, record.layer, `${record.key}.md`)
+      try {
+        const canonical = canonicalNode(fs.readFileSync(file, 'utf8'), { filename: `${record.key}.md` })
+        if (!canonical.ok) return { ok: false, reason: 'memory-write-failed', detail: 'unreadable-local-node' }
+        currentHash = resourceHash({ ...record, content: canonical.content, sensitivity: canonical.sensitivity })
+      } catch (error) {
+        if (error.code !== 'ENOENT') return { ok: false, reason: 'memory-write-failed', detail: 'unreadable-local-node' }
+        currentHash = null
+      }
+      if ((payload?.expectedHash ?? null) !== currentHash) return { ok: false, reason: 'memory-write-failed', detail: 'baseline-changed' }
+      const outcome = await writeLingshu({ root: memory.root, nodes: [record], bridge, writeGate: config.writeGate ?? 'inherit', clearance: getPolicy()?.lingshu?.maxSensitivity ?? 'internal' })
+      const first = outcome?.results?.[0]
+      if (!outcome?.ok || first?.ok === false) {
+        const code = first?.error ?? outcome?.error ?? 'lingshu-write-failed'
+        if (code === 'write-gate-requires-review') return { ok: false, reason: 'memory-needs-review' }
+        if (code === 'lingshu-bridge-unavailable') return { ok: false, reason: 'memory-bridge-unavailable' }
+        return { ok: false, reason: 'memory-write-failed', detail: String(code).slice(0, 120) }
+      }
+      return { restartRequired: false, detail: 'memoryWrite:applied' }
+    },
+  }
+  return adapter
 }
 
 // FiberState.ACTIVE is 2 in the installed Cordis contract. Entries without an
@@ -138,8 +212,9 @@ export async function resourceCatalogue(adapters) {
   }
   const plugins = (await adapters.collectInventory()).map(({ key, enabled }) => ({ key, enabled }))
   const configs = (await adapters.collectConfig()).map(({ key, entryId, bundle, config }) => ({ key, entryId, bundle, fields: paths(config) }))
-  const memories = (await adapters.collectMemory()).records.map(({ key, adapterId, relativePath }) => ({ key, adapterId, relativePath }))
-  return { plugins, configs, memories }
+  let lingshu = null
+  try { lingshu = adapters.lingshuCatalogue ? await adapters.lingshuCatalogue() : null } catch { lingshu = null }
+  return { plugins, configs, lingshu }
 }
 
 function sendJson(res, status, payload) {
@@ -150,7 +225,15 @@ function sendJson(res, status, payload) {
   res.end(JSON.stringify(payload))
 }
 
-export function apply(ctx) {
+export function apply(ctx, config) {
+  // Merged lingshu-mute host. Its write gate must be installed as early as possible;
+  // every hook/route it registers is effect-scoped to this plugin's fiber. Failures
+  // are contained so sync stays healthy even if lingshu is absent or upgraded.
+  try {
+    applyLingshuMute(ctx, config ?? {})
+  } catch (error) {
+    ctx.logger?.warn?.('device-sync: merged lingshu-mute host failed to initialise', error)
+  }
   const scope = profileScope(ctx.get('profileContext'))
   const store = createStore(scope.dir)
   const loaded = store.read()
@@ -168,10 +251,10 @@ export function apply(ctx) {
     const llm = optionalLlm
     if (!llm) return null
     const prompt = [
-      'Classify each memory resource as sync, localOnly or skip.',
+      'Decide which local plugins should join a device sync scope: sync, localOnly or skip.',
       'Return a JSON array only: [{"key":"...","action":"sync|localOnly|skip","reason":"..."}]',
-      'Resources:',
-      ...records.map((r) => `- ${r.key} (${r.adapterId}:${r.relativePath})`),
+      'Plugins:',
+      ...records.map((r) => `- ${r.key} (${r.enabled ? 'enabled' : 'disabled'})`),
     ].join('\n')
     let text = ''
     for await (const chunk of llm.stream({
@@ -192,6 +275,7 @@ export function apply(ctx) {
   const adapters = {
     ...createInventoryAdapter(ctx, scope),
     ...createCredentialAdapter(ctx, scope),
+    ...createLingshuAdapter(ctx, config?.lingshu ?? {}, () => engine?.publicState().policy ?? null),
     askModel,
     archiveDecisions: records => archiveDecisions(scope, records),
   }
@@ -211,6 +295,8 @@ export function apply(ctx) {
       case 'resolvePlanConflict': return engine.resolvePlanConflict({ planId: args.planId, key: args.key, choice: args.choice, actor: 'user' })
       case 'pairCenter': return engine.pairCenter(args)
       case 'joinCenter': return engine.joinCenter(args)
+      case 'verify': return engine.verifyInvitation(args)
+      case 'reset': return engine.resetSync()
       case 'invite': return engine.createInvitation()
       case 'policy': return engine.setPolicy(args.policy)
       case 'check': return engine.check({ kind: args.kind ?? 'plugin', source: args.source ?? 'live' })
@@ -221,7 +307,7 @@ export function apply(ctx) {
       case 'proposal': return engine.submitProposal({ kind: args.kind ?? 'plugin' })
       case 'snapshot': return engine.createSnapshot()
       case 'loadSnapshot': return engine.loadSnapshot(args.text)
-      case 'suggest': return engine.suggestMemory()
+      case 'suggest': return engine.suggest()
       case 'adopt': return engine.adoptSuggestions({ ids: args.ids, actor: 'user' })
       case 'acceptProposal': return engine.handleAcceptProposal({ proposalId: args.proposalId, actor: 'user' })
       case 'resolveConflict': return engine.resolveConflict({ conflictId: args.conflictId, choice: args.choice, actor: 'user' })
@@ -280,7 +366,7 @@ export function apply(ctx) {
         type: 'object',
         properties: {
           action: { type: 'string', enum: ['state', 'check', 'proposals', 'proposal'], description: 'Action to run' },
-          kind: { type: 'string', enum: ['plugin', 'config', 'memory', 'both', 'all'], description: 'Resource kind for check and proposal' },
+          kind: { type: 'string', enum: ['plugin', 'config', 'lingshu', 'both', 'all'], description: 'Resource kind for check and proposal' },
         },
         required: ['action'],
         additionalProperties: false,
@@ -326,7 +412,7 @@ function agentView(value) {
   if (Array.isArray(value)) return value.map(agentView)
   if (!value || typeof value !== 'object') return value
   return Object.fromEntries(Object.entries(value).filter(([key]) =>
-    !['content', 'snippet', 'config', 'payload', 'pendingSnapshot', 'tokenHash', 'credentialKey', 'mac'].includes(key))
+    !['content', 'snippet', 'title', 'config', 'payload', 'pendingSnapshot', 'tokenHash', 'credentialKey', 'mac'].includes(key))
     .map(([key, item]) => [key, agentView(item)]))
 }
 

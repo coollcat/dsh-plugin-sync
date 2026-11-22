@@ -1,6 +1,6 @@
 {
   "meta": {
     "title": "Device sync",
-    "description": "Sync plugins and explicitly selected configuration and memory between DSH profiles. Open Settings → Device sync settings to configure scope, pair devices and review plans, or use Plugins → Device sync in the sidebar."
+    "description": "Sync plugins and explicitly selected configuration between DSH profiles. Include a plugin's whole settings from the plugin list. A first-open guide fills in hub or peer-to-peer, create or join, and LAN/SSH/public presets; invitation links carry a token that is verified before connecting, and pairing can be reset. Everything lives in Plugins → Device sync in the sidebar."
   }
 }

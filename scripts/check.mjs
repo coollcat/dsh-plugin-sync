@@ -3,7 +3,9 @@ import path from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { spawnSync } from 'node:child_process'
 const root=fileURLToPath(new URL('../',import.meta.url))
-const files=['index.js','client.js',...fs.readdirSync(path.join(root,'lib')).filter(name=>name.endsWith('.js')).map(name=>'lib/'+name)]
+const walk=(dir,prefix='')=>fs.readdirSync(path.join(root,dir),{withFileTypes:true}).flatMap((entry)=>
+  entry.isDirectory()?walk(path.join(dir,entry.name),prefix+entry.name+'/'):entry.name.endsWith('.js')?[dir+'/'+entry.name]:[])
+const files=['index.js','client.js',...walk('lib')]
 for(const file of files){const result=spawnSync(process.execPath,['--check',file],{cwd:root,stdio:'inherit'});if(result.status!==0)process.exit(result.status??1)}
 const pkg=JSON.parse(fs.readFileSync(path.join(root,'package.json'),'utf8'))
 for(const file of [pkg.main,pkg.exports['.'],pkg.exports['./client'],pkg.exports['./icon'],pkg.dsh.bundle.patch])if(!fs.existsSync(path.resolve(root,file)))throw new Error('Missing package entry: '+file)
