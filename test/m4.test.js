@@ -132,8 +132,8 @@ test('ssh transport keeps host-key checking on and never sends raw secrets in ar
 })
 
 test('center-wins strategy resolves a config conflict into an operation', () => {
-  const record = (value) => ({ kind: 'pluginConfig', key: 'row-1', entryId: 'row-1', bundle: 'third-party', config: { value }, fields: [['value']], secretKeys: [], contentHash: resourceHash({ kind: 'pluginConfig', config: { value } }) })
-  const policy = defaultPolicy({ include: ['row-1'], configFields: { 'row-1': [['value']] }, caps: { configSet: true }, conflictStrategy: 'center-wins' })
+  const record = (value) => ({ kind: 'pluginConfig', key: 'row-1', entryId: 'row-1', bundle: 'third-party', config: { value, other: 1 }, fields: [['value'], ['other']], secretKeys: [], contentHash: resourceHash({ kind: 'pluginConfig', config: { value, other: 1 } }) })
+  const policy = defaultPolicy({ include: ['row-1'], configFields: { 'row-1': [['value'], ['other']] }, caps: { configSet: true }, conflictStrategy: 'center-wins' })
   const plan = buildConfigPlan({
     expected: [record('center')], local: [record('local')],
     baselines: { 'row-1': record('base').contentHash }, policy,

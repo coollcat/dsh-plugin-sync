@@ -5,8 +5,8 @@ import os from 'node:os'
 import path from 'node:path'
 import http from 'node:http'
 import { Readable } from 'node:stream'
-import { profileScope, createStore, createHostAudit, credentialAddress, createCredentialAdapter, archiveDecisions, unwrap, readBody } from '../lib/host-runtime.js'
-import { apply, inject, createInventoryAdapter, resourceCatalogue } from '../index.js'
+import { profileScope, createStore, createHostAudit, credentialAddress, createCredentialAdapter, archiveDecisions, unwrap, readBody, HostError } from '../lib/host-runtime.js'
+import { apply, inject, createInventoryAdapter, resourceCatalogue, syncServerConfig, publicErrorCode } from '../index.js'
 
 const temporary = () => fs.mkdtempSync(path.join(os.tmpdir(), 'sync-host-'))
 const validState = () => ({ version: 1, identity: {}, policy: {}, audit: [] })
@@ -154,16 +154,22 @@ test('host activation and real HTTP harness preserve auth, origin, exact routes 
   const ctx = { get(name) { if (!inject.includes(name)) throw new Error(`undeclared-service:${name}`); return services[name] }, inject() {}, effect(fn) { effects.push(fn()) } }
   // The merged lingshu-mute host returns an async install promise; await it so
   // the test does not end with a pending promise.
-  await apply(ctx)
+  const { localHandler, remoteHandler, server } = await apply(ctx, { syncPort: 0 })
+  await new Promise(resolve => server.listening ? resolve() : server.once('listening', resolve))
   t.after(() => effects.forEach(clean => typeof clean === 'function' && clean()))
   // The merged lingshu-mute host registers its own prefix; the sync prefix must
   // still be the one this test drives.
   const syncRoute = registrations.find((entry) => entry.path === '/plugin-sync')
   assert.ok(syncRoute && typeof syncRoute.handler === 'function')
-  const server = http.createServer(syncRoute.handler)
-  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve))
-  t.after(() => { server.closeAllConnections(); return new Promise(resolve => server.close(resolve)) })
-  const base = `http://127.0.0.1:${server.address().port}`
+  const localServer = http.createServer(localHandler)
+  await new Promise(resolve => localServer.listen(0, '127.0.0.1', resolve))
+  t.after(() => { localServer.closeAllConnections(); return new Promise(resolve => localServer.close(resolve)) })
+  const base = `http://127.0.0.1:${localServer.address().port}`
+  const remoteBase = `http://127.0.0.1:${server.address().port}`
+  const remoteRequest = async (route, body = {}, headers = {}, method = 'POST') => {
+    const response = await fetch(remoteBase + route, { method, headers: { 'content-type': 'application/json', ...headers }, body: method === 'POST' ? JSON.stringify(body) : undefined })
+    return { status: response.status, body: await response.json() }
+  }
   const request = async (route, body = { action: 'state' }, headers = {}, method = 'POST') => {
     const response = await fetch(base + route, { method, headers: { 'content-type': 'application/json', 'x-test-auth': 'owner', ...headers }, body: method === 'POST' ? JSON.stringify(body) : undefined })
     return { status: response.status, body: await response.json() }
@@ -179,15 +185,29 @@ test('host activation and real HTTP harness preserve auth, origin, exact routes 
   const rejectedMissing = await request('/plugin-sync/api/action', { action: 'rejectProposal', proposalId: 'absent', actor: 'agent' })
   assert.equal(rejectedMissing.status, 409)
   assert.equal(rejectedMissing.body.value.reason, 'proposal-not-pending')
-  assert.equal((await request('/plugin-sync/hello', { identity: { deviceId: 'fake', profileId: 'isolated', label: 'test', role: 'device' } })).status, 401)
-  assert.equal((await request('/plugin-sync/state', { deviceId: 5 })).status, 400)
+  // The Web GUI port never serves the wire protocol; the sync port never
+  // serves browser actions. Both reject unauthenticated transfer attempts.
+  assert.equal((await request('/plugin-sync/hello', {})).status, 404)
+  assert.equal((await remoteRequest('/plugin-sync/api/action', { action: 'state' })).status, 404)
+  assert.equal((await remoteRequest('/plugin-sync/hello', { identity: { deviceId: 'fake', profileId: 'isolated', label: 'test', role: 'device' } })).status, 401)
+  assert.equal((await remoteRequest('/plugin-sync/state', { deviceId: 5 }, { authorization: 'Bearer fake' })).status, 400)
   const secret = await request('/plugin-sync/api/action', { action: 'unknown-secret-test' }); assert.equal(secret.body.error, 'request-failed')
   assert.deepEqual(await toolRecords[0].execute({ action: 'autoSync' }), { ok: false, error: 'action-not-allowed-for-agent' })
   const malformed = await new Promise(resolve => syncRoute.handler({ url: 'http://[', headers: {} }, { setHeader() {}, end(text) { resolve(JSON.parse(text)) } }))
   assert.equal(malformed.error, 'request-failed')
   const dir = profileScope(services.profileContext).dir; assert.equal(fs.existsSync(path.join(dir, 'state.json')), true)
   const verify = await request('/plugin-sync/api/action', { action: 'verify', token: 'fake-token', url: 'http://192.0.2.10:3080' })
-  assert.equal(verify.status, 400); assert.equal(verify.body.error, 'request-failed')
+  assert.equal(verify.status, 400); assert.equal(verify.body.error, 'already-paired')
   const reset = await request('/plugin-sync/api/action', { action: 'reset' })
   assert.equal(reset.status, 200); assert.equal(reset.body.value.identity.role, 'unpaired')
+})
+
+test('sync listener config and public error codes are explicit', () => {
+  assert.deepEqual(syncServerConfig({}), { host: '127.0.0.1', port: 3081 })
+  assert.deepEqual(syncServerConfig({ syncPort: 9000, syncHost: '192.0.2.10' }), { host: '192.0.2.10', port: 9000 })
+  assert.throws(() => syncServerConfig({ syncPort: 70000 }), /invalid-sync-port/)
+  assert.equal(publicErrorCode(new Error('verify-failed')), 'verify-failed')
+  assert.equal(publicErrorCode(new Error('ssh-client-not-found')), 'ssh-client-not-found')
+  assert.equal(publicErrorCode(new Error('provider-stack-trace-with-details')), 'request-failed')
+  assert.equal(publicErrorCode(new HostError('bad-response')), 'bad-response')
 })

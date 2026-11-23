@@ -2,6 +2,18 @@
 
 ## 未发布
 
+- 同步协议脱离 Web GUI 的 3080，改用独立监听端口（默认 3081，可配 `syncPort` / `syncHost`）。3080 只保留同源的浏览器 action；3081 只接受 `/hello`、`/state`、`/proposals`，且三条路由都必须带 token，未配对前拒绝任何状态或提案查询。SSH 转发的远端端口同步改为 3081。
+- 邀请界面只保留邀请链接：链接本身内含一次性 token，去掉单独展示和输入邀请码的字段；接入方粘贴链接→解析→验证→连接不变。私钥字段仍是绝对路径，新增「选择文件」按钮由 DSH 宿主弹本机文件对话框填入（浏览器拿不到绝对路径），支持 `~` 展开；ssh 找不到时给出 `ssh-client-not-found` 而不是笼统失败。
+- 报错细化：后端不再把所有引擎异常压成 `request-failed`，白名单内的错误码（如 `verify-failed`、`ssh-failed`、`ssh-client-not-found`、`already-paired`）原样送到面板，未知码在界面以原码显示，便于定位 Windows 等环境的连接失败。
+- 「让 agent 给建议」改为通过 `uiWorkspace.startSession` 开一个新对话，预填本机插件清单并要求忽略 IM/聊天/记忆/灵枢等绑定本机或独立同步域的插件。删除模型复核（`policy.ai`、`askModel`、`fromModel` 与相关设置），旧状态加载时迁移掉 `ai` 字段。
+- 「允许同步的改动」和「规则」从高级设置移到「同步范围」；高级设置只剩自动应用和检查间隔。
+- 新增回归：HTTP 双监听器的路由隔离与 token 门禁、错误码透传、新对话预填、私钥文件选择按钮、规则位置。全套 118 项、`check`、`check:public` 通过。
+
+- 配置同步加门控：插件只有在本机暴露 ≥2 个非密钥配置字段（`MIN_CONFIG_FIELDS`）时才会出现「同步设置」勾选框；目录用 `eligible` 标记，客户端勾选/导入和引擎 `evaluate` 三处共用同一门槛，单字段配置不再能把设置外发。`USAGE.md` 同步说明。
+- 本地插件进入同步范围：`parseSource` 认 `link:`/`file:` bundle，映射为内容寻址的 `file` 源（`name` + `sha256`，不含本机绝对路径），可同步装没装/启停与设置；跨设备安装仍按 `source-not-supported:file` 拒绝，安装适配器仍只接受 registry。
+- 中心对设备推送的插件增加「安装/不安装」选择：提案卡新增「接受并本机安装」，走 `acceptAndInstall`（接受 → check → approve → apply），仍受本机 `caps.install`、策略与审批约束；普通「接受并发布」只写权威态、不在中心安装。提案记录 `localInstall` 决定供审计。
+- 新增 `test/task-gating-install.test.js`：7 项覆盖门控、本地源、中心安装选择与对抗场景；全套 114 项、`check`、`check:public` 通过。
+
 - SSH 连接表单简化：用户只需填 SSH 主机、用户、私钥路径和 SSH 端口（默认 22），不再要求手填 `known_hosts` 路径；远端 DSH HTTP 端口固定 3080。传输改用 `StrictHostKeyChecking=accept-new`，首次连接自动把主机指纹写入系统默认 `~/.ssh/known_hosts`，之后指纹变化仍拒绝，保留 host key 校验、无关闭校验快捷模式。邀请链接的 `ssh://` URL 带 `port` 参数以便对端还原。
 - 建议卡按插件性质分类：普通插件仍建议「纳入同步」，设备专属插件（IM / 记忆 / 聊天类，账号或状态绑定本机）建议「留本机」且其设置不同步；系统/停用/已纳入规则不变。`analyzePlugins` 增加 `isDeviceLocal` 判定，`docs/USAGE.md` 同步说明。
 

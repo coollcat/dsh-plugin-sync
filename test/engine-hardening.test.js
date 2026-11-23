@@ -9,9 +9,10 @@ function resource(fields) { return { ...fields, contentHash: resourceHash(fields
 function plugin(key, enabled = true, version = '1.0.0') {
   return resource({ kind: 'plugin', key, enabled, source: { type: 'registry', package: key, version } })
 }
-const config = (value, entryId = 'row') => configRecord({ entryId, bundle: 'package-a', config: { updates: { 'literal.key': value, other: 'PRIVATE' }, token: 'SECRET' } })
+const config = (value, entryId = 'row') => configRecord({ entryId, bundle: 'package-a', config: { updates: { 'literal.key': value, other: 'PRIVATE' }, mode: 'auto', token: 'SECRET' } })
 const field = ['updates', 'literal.key']
-const shared = { include: ['row'], configFields: { row: [field] } }
+const fields = [field, ['mode']]
+const shared = { include: ['row'], configFields: { row: fields } }
 
 function node(deviceId, values = {}, transport) {
   const store = { read() { return structuredClone(this.value) }, write(next) { this.value = structuredClone(next) } }
@@ -73,10 +74,10 @@ test('check(all) has isolated approvals and apply binds the active policy', asyn
   assert.equal((await member.engine.apply({ planId: plan.planId })).status, 'unauthorized')
   assert.deepEqual(member.calls, [])
   assert.equal((await member.engine.apply({ planId: configPlan.planId })).status, 'ok')
-  assert.deepEqual(member.calls[0].fields, [field])
+  assert.deepEqual(member.calls[0].fields, fields)
   assert.equal(member.calls[0].bundle, 'package-a')
   assert.equal(member.calls[0].expectedHash, configPlan.operations[0].fromHash)
-  assert.deepEqual(member.calls[0].config, { updates: { 'literal.key': 'remote' } })
+  assert.deepEqual(member.calls[0].config, { updates: { 'literal.key': 'remote' }, mode: 'auto' })
   assert.equal(approve(member.engine, plan).ok, true)
   member.setPolicy({ direction: 'push' })
   assert.equal((await member.engine.apply({ planId: plan.planId })).status, 'unauthorized')
@@ -95,7 +96,7 @@ test('pair, proposal, state, and snapshot share only policy-selected resources a
   await sender.engine.publishLocal()
   const snap = await sender.engine.createSnapshot()
   assert.deepEqual(snap.expectedConfig.map(({ key }) => key), ['row'])
-  assert.deepEqual(snap.expectedConfig[0].config, { updates: { 'literal.key': 'public' } })
+  assert.deepEqual(snap.expectedConfig[0].config, { updates: { 'literal.key': 'public' }, mode: 'auto' })
   assert.deepEqual(snap.expectedConfig[0].secretKeys, [])
   assert.doesNotMatch(JSON.stringify(snap), /PRIVATE|SECRET|not-opted-in/)
   let wire
@@ -157,7 +158,7 @@ test('equal baselines preserve local-only edits and AI suggestions require a fre
   member.setPolicy({ ...shared, conflictStrategy: 'ai-suggest' }, { configSet: true })
   await member.engine.joinCenter({ url: ENDPOINT, token: center.engine.createInvitation().token })
   assert.equal((await member.engine.check({ kind: 'config' })).configPlan.operations.length, 0)
-  assert.equal(member.engine.publicState().configBaselines.row, configRecord({ ...config('base'), fields: [field] }).contentHash)
+  assert.equal(member.engine.publicState().configBaselines.row, configRecord({ ...config('base'), fields }).contentHash)
   member.data.config = [config('local')]
   const unilateral = (await member.engine.check({ kind: 'config' })).configPlan
   assert.equal(unilateral.operations.length, 0)
@@ -215,7 +216,7 @@ test('two peers exchange both ways, retain divergent versions and resolve only a
 
 test('accepted P2P listener config becomes a local apply plan without republishing', async () => {
   const key = 'row'
-  const policy = { include: [key], configFields: { row: [field] } }
+  const policy = { include: [key], configFields: { row: fields } }
   const listener = node('listener')
   listener.setPolicy(policy)
   await listener.engine.pairCenter({ topology: 'p2p' })

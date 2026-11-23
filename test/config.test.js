@@ -7,16 +7,16 @@ import { defaultPolicy } from '../lib/policy.js'
 import { createEngine } from '../lib/engine.js'
 import { signChangeset } from '../lib/protocol.js'
 
-const selection = { include: ['row-1'], configFields: { 'row-1': [['value']] } }
+const selection = { include: ['row-1'], configFields: { 'row-1': [['value'], ['other']] } }
 const cfg = (key, value, extra = {}) => ({
   kind: 'pluginConfig',
   key,
   entryId: key,
   bundle: 'third-party',
-  config: { value },
+  config: { value, other: 1 },
   secretKeys: [],
-  fields: [['value']],
-  contentHash: configHash({ value }),
+  fields: [['value'], ['other']],
+  contentHash: configHash({ value, other: 1 }),
   ...extra,
 })
 
@@ -49,7 +49,7 @@ test('config plan detects a concurrent change', () => {
   const policy = defaultPolicy({ ...selection, caps: { configSet: true } })
   const expected = [cfg('row-1', 'center')]
   const local = [cfg('row-1', 'local')]
-  const plan = buildConfigPlan({ expected, local, baselines: { 'row-1': configHash({ value: 'base' }) }, policy })
+  const plan = buildConfigPlan({ expected, local, baselines: { 'row-1': configHash({ value: 'base', other: 1 }) }, policy })
   assert.equal(plan.operations.length, 0)
   assert.equal(plan.conflicts[0].kind, 'concurrent-config-change')
 })
@@ -59,7 +59,7 @@ test('config plan creates an operation when only the center changed', () => {
   const plan = buildConfigPlan({
     expected: [cfg('row-1', 'center')],
     local: [cfg('row-1', 'base')],
-    baselines: { 'row-1': configHash({ value: 'base' }) },
+    baselines: { 'row-1': configHash({ value: 'base', other: 1 }) },
     policy,
   })
   assert.equal(plan.operations.length, 1)

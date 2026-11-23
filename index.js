@@ -3,9 +3,12 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import http from 'node:http'
+import os from 'node:os'
+import { spawn } from 'node:child_process'
 
-import { createEngine } from './lib/engine.js'
-import { configRecord, projectConfig, mergeConfigFields, configHash, validFieldPath, isSecretKey } from './lib/config.js'
+import { createEngine, PUBLIC_ERRORS } from './lib/engine.js'
+import { configRecord, projectConfig, mergeConfigFields, configHash, validFieldPath, isSecretKey, MIN_CONFIG_FIELDS } from './lib/config.js'
 import { hash, validateIdentity, validateChangeset, validateLingshuRecord, resourceHash, LINGSHU_LAYERS } from './lib/protocol.js'
 import { bearerFrom } from './lib/transport.js'
 import { profileScope, createStore, createHostAudit, createCredentialAdapter, archiveDecisions, unwrap, HostError, jsonRequestGate, readBody, businessStatus } from './lib/host-runtime.js'
@@ -20,6 +23,12 @@ export const inject = ['pluginManager', 'configEditor', 'webServer', 'credential
 
 const PLUGIN_NAME = '@local/dsh-plugin-sync'
 const ROUTE_PREFIX = '/plugin-sync'
+// Local link:/file: bundles are reproducible on their own device only: the
+// absolute path differs per machine, so a cross-device install would be wrong.
+// Represent them as a content-addressed file source (name + sha256 of the
+// bundle identity) so they join the inventory for enable/disable and config
+// sync, but the planner still refuses cross-device install (source-not-supported).
+// Never transmit the local filesystem path.
 function parseSource(bundle) {
   const version = bundle.version
   const source = bundle.source ?? ''
@@ -29,6 +38,12 @@ function parseSource(bundle) {
   const match = /(?:^|[#/])([0-9a-f]{40})(?:$|[^0-9a-f])/.exec(source)
   if (match && bundle.update === 'git') {
     return { type: 'git', url: source.replace(/#[0-9a-f]{40}.*$/, ''), commit: match[1] }
+  }
+  if (/^(?:link|file):/i.test(source)) {
+    // name must be a basename without separators (protocol.js file source rules).
+    const name = String(bundle.name).split(/[\\/]/).filter(Boolean).pop() ?? ''
+    if (!name || name.length > 300 || name.includes('\\')) return null
+    return { type: 'file', name, sha256: hash({ local: bundle.name, version: version ?? null }) }
   }
   return null
 }
@@ -211,7 +226,10 @@ export async function resourceCatalogue(adapters) {
     return output
   }
   const plugins = (await adapters.collectInventory()).map(({ key, enabled }) => ({ key, enabled }))
-  const configs = (await adapters.collectConfig()).map(({ key, entryId, bundle, config }) => ({ key, entryId, bundle, fields: paths(config) }))
+  const configs = (await adapters.collectConfig()).map(({ key, entryId, bundle, config }) => {
+    const fields = paths(config)
+    return { key, entryId, bundle, fields, eligible: fields.length >= MIN_CONFIG_FIELDS }
+  })
   let lingshu = null
   try { lingshu = adapters.lingshuCatalogue ? await adapters.lingshuCatalogue() : null } catch { lingshu = null }
   return { plugins, configs, lingshu }
@@ -223,6 +241,79 @@ function sendJson(res, status, payload) {
   res.setHeader('cache-control', 'no-store')
   if (status === 408 || status === 413) res.setHeader('connection', 'close')
   res.end(JSON.stringify(payload))
+}
+
+// The device-sync wire protocol lives on its own listener, away from the Web
+// GUI port. Nothing is served there until /hello completes a token handshake;
+// state and proposal queries are authorized against that paired peer.
+export function syncServerConfig(config = {}, fallbackHost = '127.0.0.1') {
+  const port = Number.isInteger(config.syncPort) ? config.syncPort : 3081
+  // 0 requests an OS-assigned port, used by the HTTP harness.
+  if (port < 0 || port > 65535) throw new Error('invalid-sync-port')
+  const host = typeof config.syncHost === 'string' && config.syncHost ? config.syncHost : fallbackHost
+  if (!/^[A-Za-z0-9.:\[\]]{1,253}$/.test(host)) throw new Error('invalid-sync-host')
+  return { host, port }
+}
+
+// Only closed, known codes cross the HTTP boundary. Provider messages and raw
+// exceptions can carry paths or credentials, so everything else is generic;
+// the browser maps these codes to readable text in both locales.
+export function publicErrorCode(error) {
+  if (error instanceof HostError) return error.message
+  const code = error?.code ?? error?.message ?? error
+  if (typeof code === 'string' && (PUBLIC_ERRORS.has(code) || /^http-[1-5]\d{2}$/.test(code))) return code
+  return 'request-failed'
+}
+
+function runDialog(command, args) {
+  return new Promise((resolve, reject) => {
+    let child
+    try { child = spawn(command, args, { stdio: ['ignore', 'pipe', 'pipe'] }) }
+    catch { reject(new HostError('pick-file-unavailable')); return }
+    const out = []
+    let size = 0
+    let settled = false
+    const timer = setTimeout(() => { if (!settled) { settled = true; child.kill('SIGKILL'); reject(new HostError('pick-file-failed')) } }, 60000)
+    child.stdout.on('data', (chunk) => {
+      size += chunk.length
+      if (size > 8192) { if (!settled) { settled = true; child.kill('SIGKILL'); reject(new HostError('pick-file-failed')) } }
+      else out.push(chunk)
+    })
+    child.stderr.on('data', () => {})
+    child.on('error', () => { if (!settled) { settled = true; clearTimeout(timer); reject(new HostError('pick-file-unavailable')) } })
+    child.on('close', (code) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timer)
+      if (code !== 0) { reject(new HostError('pick-file-failed')); return }
+      const value = Buffer.concat(out).toString('utf8').split(/\r?\n/).map((line) => line.trim()).find(Boolean) ?? ''
+      resolve(value || null)
+    })
+  })
+}
+
+// Host-side OS file dialog: browsers cannot expose an absolute local path,
+// so the button asks the host that runs the Web GUI to choose one.
+export async function pickKeyFilePath() {
+  let value
+  if (process.platform === 'win32') {
+    const script = [
+      'Add-Type -AssemblyName System.Windows.Forms',
+      '$d = New-Object System.Windows.Forms.OpenFileDialog',
+      '$d.Title = "Select SSH private key"',
+      '$d.Filter = "All files|*.*"',
+      'if ($d.ShowDialog() -eq [System.Windows.Forms.DialogResult]::OK) { Write-Output -NoEnumerate $d.FileName }',
+    ].join('; ')
+    value = await runDialog('powershell.exe', ['-NoProfile', '-NonInteractive', '-STA', '-Command', script])
+  } else if (process.platform === 'darwin') {
+    value = await runDialog('osascript', ['-e', 'POSIX path of (choose file)'])
+  } else {
+    value = await runDialog('zenity', ['--file-selection', '--title=Select SSH private key'])
+  }
+  if (value === null) return null
+  if (typeof value !== 'string' || !value || value.length > 4096 || /[\r\n\0]/.test(value) ||
+      !(path.isAbsolute(value) || /^[~]/.test(value))) throw new HostError('pick-file-failed')
+  return value
 }
 
 export function apply(ctx, config) {
@@ -240,52 +331,22 @@ export function apply(ctx, config) {
   const audit = createHostAudit()
   audit.replaceLoaded(loaded?.audit ?? [])
   let engine = null
-  let optionalLlm = null
-  ctx.inject(['llm'], llmContext => {
-    optionalLlm = llmContext.get('llm')
-    llmContext.effect(() => () => { optionalLlm = null }, 'device-sync: optional llm')
-  })
-  const askModel = async (records) => {
-    const config = engine?.publicState().policy.ai
-    if (!config?.enabled || !config.provider || !config.model) return null
-    const llm = optionalLlm
-    if (!llm) return null
-    const prompt = [
-      'Decide which local plugins should join a device sync scope: sync, localOnly or skip.',
-      'Return a JSON array only: [{"key":"...","action":"sync|localOnly|skip","reason":"..."}]',
-      'Plugins:',
-      ...records.map((r) => `- ${r.key} (${r.enabled ? 'enabled' : 'disabled'})`),
-    ].join('\n')
-    let text = ''
-    for await (const chunk of llm.stream({
-      provider: config.provider, model: config.model, maxTokens: config.maxTokens ?? 800,
-      messages: [{ role: 'user', content: [{ type: 'text', text: prompt }] }],
-    })) {
-      if (chunk?.type === 'text-delta') text += chunk.text ?? ''
-    }
-    const match = text.match(/\[[\s\S]*\]/)
-    if (!match) return []
-    try {
-      const parsed = JSON.parse(match[0])
-      return Array.isArray(parsed) ? parsed.filter((item) => item && typeof item.key === 'string') : []
-    } catch {
-      return []
-    }
-  }
   const adapters = {
     ...createInventoryAdapter(ctx, scope),
     ...createCredentialAdapter(ctx, scope),
     ...createLingshuAdapter(ctx, config?.lingshu ?? {}, () => engine?.publicState().policy ?? null),
-    askModel,
     archiveDecisions: records => archiveDecisions(scope, records),
   }
   engine = createEngine({ store, adapters, audit })
   engine.publicState()
 
+  const syncServer = syncServerConfig(config, ctx.get('webServer')?.host)
+
   const localAction = async (name, args) => {
     args = { ...args, actor: 'user' }
     switch (name) {
-      case 'state': return engine.publicState()
+      case 'state': return { ...engine.publicState(), syncPort: syncServer.port }
+      case 'pickFile': return { path: await pickKeyFilePath() }
       case 'inventory': return resourceCatalogue(adapters)
       case 'archiveDecisions': return engine.archiveDecisions({ actor: 'user' })
       case 'connectPeer': return engine.connectPeer(args)
@@ -309,17 +370,21 @@ export function apply(ctx, config) {
       case 'loadSnapshot': return engine.loadSnapshot(args.text)
       case 'suggest': return engine.suggest()
       case 'adopt': return engine.adoptSuggestions({ ids: args.ids, actor: 'user' })
-      case 'acceptProposal': return engine.handleAcceptProposal({ proposalId: args.proposalId, actor: 'user' })
+      case 'acceptProposal': return engine.handleAcceptProposal({ proposalId: args.proposalId, actor: 'user', installLocally: args.installLocally === true })
+      case 'acceptAndInstall': return engine.acceptAndInstall({ proposalId: args.proposalId, actor: 'user' })
       case 'resolveConflict': return engine.resolveConflict({ conflictId: args.conflictId, choice: args.choice, actor: 'user' })
       case 'proposals': return engine.handleListProposals()
       default: throw new Error(`unknown-action:${name}`)
     }
   }
 
-  const handler = async (req, res) => {
+  const errorResponse = (res, error) => sendJson(
+    res, error instanceof HostError ? error.status : 400, { error: publicErrorCode(error) })
+
+  // Web GUI listener: same-origin browser actions only.
+  const localHandler = async (req, res) => {
     try {
-      const url = new URL(req.url ?? '/', 'http://localhost')
-      const pathname = url.pathname
+      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
       if ([`${ROUTE_PREFIX}/api/action`, `${ROUTE_PREFIX}/api/state`].includes(pathname)) {
         const connection = ctx.get('connection')
         if (!connection) return sendJson(res, 403, { error: 'local-access-required' })
@@ -332,28 +397,45 @@ export function apply(ctx, config) {
         const status = businessStatus(result)
         return sendJson(res, status, { ok: status === 200, value: result ?? null })
       }
-      if ([`${ROUTE_PREFIX}/hello`, `${ROUTE_PREFIX}/state`, `${ROUTE_PREFIX}/proposals`].includes(pathname)) {
-        jsonRequestGate(req)
-        const body = await readBody(req)
-        validateRemoteBody(pathname, body)
-        const token = bearerFrom(req.headers?.authorization)
-        let result
-        if (pathname === `${ROUTE_PREFIX}/hello`) result = await engine.handleHello({ token, identity: body.identity })
-        else if (pathname === `${ROUTE_PREFIX}/state`) result = await engine.handleGetState({ token, deviceId: body.deviceId, offer: body.offer, acknowledgedOffers: body.acknowledgedOffers })
-        else result = await engine.handleSubmitProposal({ token, identity: body.identity, changeset: body.changeset })
-        return sendJson(res, businessStatus(result), result)
-      }
       return sendJson(res, 404, { error: 'not-found' })
     } catch (error) {
-      // Provider/config/parser errors can embed credentials; only our fixed
-      // boundary codes are safe to return to an HTTP caller.
-      return sendJson(res, error instanceof HostError ? error.status : 400, { error: error instanceof HostError ? error.message : 'request-failed' })
+      return errorResponse(res, error)
+    }
+  }
+
+  // Dedicated sync listener: three routes, all token-gated. `/hello` is the
+  // handshake; state and proposal routes are refused until that peer is paired.
+  const remoteHandler = async (req, res) => {
+    try {
+      const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
+      if (![`${ROUTE_PREFIX}/hello`, `${ROUTE_PREFIX}/state`, `${ROUTE_PREFIX}/proposals`].includes(pathname)) {
+        return sendJson(res, 404, { error: 'not-found' })
+      }
+      jsonRequestGate(req)
+      const token = bearerFrom(req.headers?.authorization)
+      if (typeof token !== 'string' || !token) return sendJson(res, 401, { error: 'unauthorized' })
+      const body = await readBody(req)
+      validateRemoteBody(pathname, body)
+      let result
+      if (pathname === `${ROUTE_PREFIX}/hello`) result = await engine.handleHello({ token, identity: body.identity })
+      else if (pathname === `${ROUTE_PREFIX}/state`) result = await engine.handleGetState({ token, deviceId: body.deviceId, offer: body.offer, acknowledgedOffers: body.acknowledgedOffers })
+      else result = await engine.handleSubmitProposal({ token, identity: body.identity, changeset: body.changeset })
+      return sendJson(res, businessStatus(result), result)
+    } catch (error) {
+      return errorResponse(res, error)
     }
   }
 
   const webServer = ctx.get('webServer')
   if (!webServer) throw new Error('webServer service is required for device sync')
-  ctx.effect(() => webServer.register({ kind: 'prefix', path: ROUTE_PREFIX, handler }), 'device-sync: routes')
+  ctx.effect(() => webServer.register({ kind: 'prefix', path: ROUTE_PREFIX, handler: localHandler }), 'device-sync: local routes')
+
+  const server = http.createServer(remoteHandler)
+  server.on('error', (error) => ctx.logger?.warn?.('device-sync: sync listener error', error))
+  ctx.effect(() => {
+    server.listen(syncServer.port, syncServer.host)
+    return () => { server.close(); server.closeAllConnections?.() }
+  }, 'device-sync: sync listener')
 
   // Read-only / proposal actions only. Approval, policy changes and apply stay
   // user-only actions in the Web panel.
@@ -404,6 +486,9 @@ export function apply(ctx, config) {
     handle.unref?.()
     return () => { stopped = true; if (handle) clearTimeout(handle) }
   }, 'device-sync: scheduler')
+
+  // Returned for the HTTP harness: two listeners with distinct trust planes.
+  return { localHandler, remoteHandler, server, syncServer }
 }
 
 // Agent inspection receives metadata only, including on direct check/proposals

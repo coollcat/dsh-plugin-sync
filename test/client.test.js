@@ -17,7 +17,7 @@ try {
   if (depsRoot || error.code !== 'MODULE_NOT_FOUND') throw error
 }
 
-function register(react, transport, language = 'en', storage = new Map()) {
+function register(react, transport, language = 'en', storage = new Map(), extra = {}) {
   let loaded, dictionaries
   const registrations = []
   const effects = []
@@ -44,6 +44,7 @@ function register(react, transport, language = 'en', storage = new Map()) {
   // must still work when only slots and locale are provided.
   assert.ok(['slots', 'locale'].every((name) => module.inject.includes(name)))
   module.apply({
+    ...extra,
     effect(fn, label) { effects.push(label); return fn() },
     locale: {
       register(ns, value) { dictionaries = value; return () => {} },
@@ -98,14 +99,14 @@ const PLUGINS = [
   { key: 'beta', enabled: true },
   { key: 'gamma', enabled: false },
 ]
-const INVENTORY = { plugins: PLUGINS, configs: [{ key: 'alpha-config', entryId: 'alpha-config', bundle: 'alpha', fields: [['theme']] }] }
+const INVENTORY = { plugins: PLUGINS, configs: [{ key: 'alpha-config', entryId: 'alpha-config', bundle: 'alpha', fields: [['theme'], ['density']], eligible: true }] }
 const response = (payload, status = 200) => ({ ok: status < 300, status, text: async () => JSON.stringify(payload) })
 const success = (value) => response({ ok: true, value })
 function text(node) {
   if (node?.type === 'style') return ''
   return (node.children ?? []).map((child) => typeof child === 'object' && child !== null ? text(child) : String(child ?? '')).join(' ')
 }
-async function mount(t, start, respond, { slot = 'plugins.tab', language = 'en', storage = new Map() } = {}) {
+async function mount(t, start, respond, { slot = 'plugins.tab', language = 'en', storage = new Map(), extra = {} } = {}) {
   globalThis.IS_REACT_ACT_ENVIRONMENT = true
   const requests = []
   let current = start
@@ -119,7 +120,7 @@ async function mount(t, start, respond, { slot = 'plugins.tab', language = 'en',
     requests.push(body)
     const result = respond?.(body, current)
     return (await result) ?? success(current)
-  }, language, storage)
+  }, language, storage, extra)
   const Component = registrations.find(({ options }) => options.name === slot).component
   let rendered
   await React.act(async () => { rendered = Renderer.create(React.createElement(Component)) })
@@ -135,6 +136,7 @@ async function mount(t, start, respond, { slot = 'plugins.tab', language = 'en',
   const all = () => text(rendered.root)
   return {
     requests, button, hasButton, all, flush,
+    inputValues: () => rendered.root.findAllByType('input').map((element) => element.props.value),
     nthInput: async (label, index, checked) => {
       await React.act(async () => {
         const row = rendered.root.findAllByType('li').find((element) => text(element).includes(label))
@@ -263,7 +265,7 @@ hookTest('select all and the plugin-list settings switch update the same policy 
   await ui.nthInput('alpha', 1, true)
   written = ui.requests.filter((item) => item.action === 'policy').at(-1)
   assert.equal(written.policy.caps.configSet, true)
-  assert.deepEqual(written.policy.configFields['alpha-config'], [['theme']])
+  assert.deepEqual(written.policy.configFields['alpha-config'], [['theme'], ['density']])
 })
 
 hookTest('advice adds missing plugins and adopts a suggestion through the API', async (t) => {
@@ -367,7 +369,7 @@ hookTest('the first-open guide fills a connection preset and only shows once', a
   assert.equal(storage.get('dsh-plugin-sync:guide-dismissed:v1'), '1')
   assert.ok(!ui.all().includes('First time here?'), ui.all())
   assert.ok(ui.all().includes('Preset applied: Peer to peer · join'), ui.all())
-  assert.ok(ui.all().includes('Invitation code'), ui.all())
+  assert.ok(ui.all().includes('Invitation link'), ui.all())
   const next = await mount(t, start, answer(start), { storage })
   assert.ok(!next.all().includes('First time here?'), next.all())
   await ui.click('Show the guide again')
@@ -381,7 +383,7 @@ hookTest('the plugin list includes a whole plugin config with one toggle', async
   const written = ui.requests.filter((item) => item.action === 'policy').at(-1)
   assert.ok(written, 'no policy write')
   assert.ok(written.policy.include.includes('alpha-config'))
-  assert.deepEqual(written.policy.configFields['alpha-config'], [['theme']])
+  assert.deepEqual(written.policy.configFields['alpha-config'], [['theme'], ['density']])
   assert.equal(written.policy.caps.configSet, true)
   await ui.nthInput('alpha', 1, false)
   const after = ui.requests.filter((item) => item.action === 'policy').at(-1)
@@ -415,4 +417,38 @@ hookTest('an invitation link is parsed and the connection stays locked until ver
   assert.equal(verified.url, 'http://192.0.2.10:3080')
   assert.equal(verified.token, 'tok-123')
   assert.ok(ui.all().includes('Verified'), ui.all())
+})
+
+hookTest('agent advice opens a new chat prefilled with the installed plugin list', async (t) => {
+  const start = state('center')
+  const started = []
+  const ui = await mount(t, start, answer(start), {
+    extra: { uiWorkspace: { startSession: (id, options) => started.push({ id, options }) } },
+  })
+  await ui.click('Ask the agent for suggestions')
+  assert.equal(started.length, 1)
+  assert.equal(started[0].id, undefined)
+  assert.equal(started[0].options.whenDraftExists, 'append')
+  assert.match(started[0].options.prompt, /alpha/)
+  assert.match(started[0].options.prompt, /Lingshu/)
+  assert.equal(ui.requests.some((item) => item.action === 'suggest'), false)
+})
+
+hookTest('SSH key path has a host-side picker and no separate invitation code field', async (t) => {
+  const start = state('unpaired')
+  const ui = await mount(t, start, answer(start, { pickFile: () => success({ path: 'C:\\keys\\id_ed25519' }) }))
+  await ui.click('I connect to another device')
+  await ui.click('SSH tunnel')
+  assert.ok(ui.hasButton('Browse'))
+  await ui.click('Browse')
+  assert.equal(ui.requests.filter((item) => item.action === 'pickFile').length, 1)
+  assert.ok(ui.inputValues().includes('C:\\keys\\id_ed25519'))
+  assert.equal(ui.all().includes('Invitation code'), false)
+})
+
+hookTest('scope owns rules and allowed changes, advanced no longer offers model review', async (t) => {
+  const ui = await mount(t, state('center'), answer(state('center')))
+  assert.ok(ui.all().includes('Changes allowed to sync'))
+  assert.ok(ui.all().includes('Never sync these (one per line, * allowed)'))
+  assert.equal(ui.all().includes('Use a model to review suggestions'), false)
 })

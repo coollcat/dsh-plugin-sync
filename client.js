@@ -28,16 +28,16 @@ window.__ModuleLoader__.load({
       peerLimit: 'This peer endpoint already has a device. Revoke it before inviting another.',
       createCenter: 'Let another device connect to me', joinCenter: 'I connect to another device', listenPeer: 'Direct between two devices',
       revoke: 'Revoke', revoked: 'Access revoked', invite: 'Invite a new device', hideInvite: 'Hide',
-      inviteToken: 'Invitation code', inviteExpires: 'Expires', inviteHint: 'Send this code to the other device. It works once and expires in 24 hours.',
-      joinUrl: 'Address', joinToken: 'Invitation code', joinKind: 'The other device is a', ssh: 'Use an SSH tunnel (optional)',
+      inviteExpires: 'Expires', inviteHint: 'Send this link to the other device. It works once and expires in 24 hours.',
+      joinUrl: 'Address', joinKind: 'The other device is a', ssh: 'Use an SSH tunnel (optional)',
       sshHost: 'SSH host', sshUser: 'User', sshIdentity: 'Private key file', sshPort: 'SSH port',
-      sshHint: 'Uses the system OpenSSH client. The host key is verified on first connection and remembered; it never stores your private key.',
-      secureHint: 'Use HTTPS on public networks, plain HTTP only on a trusted LAN, or an SSH tunnel. Anyone with the invitation code can use it.',
+      sshHint: 'Uses the system OpenSSH client with the private key path below. The host key is verified on first connection and remembered; the plugin never stores your key.',
+      secureHint: 'Use HTTPS on public networks, plain HTTP only on a trusted LAN, or an SSH tunnel. Anyone with the invitation link can use it.',
       advice: 'Suggestions', adviceHint: 'Based on this device, applied in one click',
       notIncluded: 'plugins are not in the sync scope', adoptAll: 'Add all', allIncluded: 'All included',
       askAgent: 'Ask the agent for suggestions', regenerate: 'Regenerate', showList: 'Show', hideList: 'Hide',
       adviceScope: 'Suggested: include {sync}, keep local {local}', adviceEmpty: 'Nothing to suggest',
-      adopt: 'Include', keepLocal: 'Keep local', dismiss: 'Not now', fromModel: 'Model suggestion',
+      adopt: 'Include', keepLocal: 'Keep local', dismiss: 'Not now',
       scope: 'Sync scope', scopeHint: 'What moves between this device and the other one',
 
       direction: 'Direction', both: 'Both ways', push: 'Push only', pull: 'Pull only',
@@ -54,7 +54,7 @@ window.__ModuleLoader__.load({
       memoryLayerContextual: 'Contextual', memoryLayerGoals: 'Goals', memoryLayerUnresolved: 'Unresolved',
       memoryLayerKnowledge: 'Knowledge', memoryLayerStructural: 'Structural',
       sync: 'Sync', syncHint: 'Compare first, then choose what to apply',
-      incoming: 'Incoming changes', from: 'from', accept: 'Accept and publish', reject: 'Reject',
+      incoming: 'Incoming changes', from: 'from', accept: 'Accept and publish', acceptInstall: 'Accept and install here', reject: 'Reject',
       noIncoming: 'Nothing waiting', conflict: 'Conflict', conflictHint: 'Only version fingerprints are shown, never config values.',
       keepMine: 'Keep mine', useTheirs: 'Use theirs', bothChanged: 'Both sides changed',
       compare: 'Compare', sendTheirs: 'Send to the other device', publishLocal: 'Publish local changes', applySelected: 'Apply {n} to this device',
@@ -77,8 +77,6 @@ window.__ModuleLoader__.load({
       allowed: 'Changes allowed to sync', install: 'Install new plugins', upgrade: 'Upgrade plugins',
       enable: 'Enable plugins', disable: 'Disable plugins', configSet: 'Write plugin config',
       rules: 'Rules', excludeLabel: 'Never sync these (one per line, * allowed)', localOnlyLabel: 'Keep only on this device (one per line)',
-      model: 'Model review', modelHint: 'Sends plugin metadata to the provider; may cost money.',
-      modelEnable: 'Use a model to review suggestions', provider: 'Provider', modelId: 'Model',
       noProtected: 'Protected system plugins are never synced.',
       heroTitle: 'Device sync',
       heroHint: 'First choose how this device connects, then decide what moves between devices. Changes save as you go.',
@@ -102,14 +100,19 @@ window.__ModuleLoader__.load({
       guideNetwork: 'Connection path',
       netLan: 'LAN', netLanDesc: 'Direct http:// over a trusted local network',
       netSsh: 'SSH tunnel', netSshDesc: 'Key-based access; the remote side listens only locally',
-      netPublic: 'Public network', netPublicDesc: 'HTTPS address plus a token; keep the token private',
-      lanHint: 'LAN uses http://IP:3080. The invitation token is the only credential — send it privately.',
+      netPublic: 'Public network', netPublicDesc: 'HTTPS address with an invitation link; keep the link private',
+      lanHint: 'LAN uses http://IP:3081. The invitation link is the only credential — send it privately.',
       sshModeHint: 'SSH uses your key as the credential. Fill in the SSH host, user, key path and port (default 22).',
-      publicHint: 'Public access must use https:// and a token. Anyone with the token can join.',
+      publicHint: 'Public access must use https:// on the sync port and an invitation link. Anyone with the link can join.',
       inviteLink: 'Invitation link', inviteLinkHint: 'Paste the full link shared by the other device',
       parseLink: 'Parse link', linkParsed: 'Link parsed. Verify it before connecting.',
       verifyLink: 'Verify link', verified: 'Verified',
       'verify-failed': 'The link or token could not be verified.',
+      'ssh-client-not-found': 'No system ssh client found. Install OpenSSH and make sure ssh is on PATH.',
+      'pick-file-unavailable': 'The host cannot open a file dialog. Type the absolute key path instead.',
+      'pick-file-failed': 'Could not read the selected path. Type the absolute key path instead.',
+      'request-failed': 'The sync service rejected the request.',
+      pickFile: 'Browse', askAgentHint: 'Opens a new chat with your installed plugin list.',
       copyLink: 'Copy link', copied: 'Link copied.', 'copy-failed': 'Could not copy the link.',
       hostAddress: 'Address other devices use to reach me',
       resetSync: 'Reset sync', resetConfirm: 'Confirm reset', cancel: 'Cancel',
@@ -140,16 +143,16 @@ window.__ModuleLoader__.load({
       peerLimit: '这里已经配对了一台设备，撤销后才能邀请另一台。',
       createCenter: '让别的设备连我', joinCenter: '我去连别的设备', listenPeer: '两台设备直连',
       revoke: '撤销', revoked: '已撤销', invite: '邀请新设备', hideInvite: '收起',
-      inviteToken: '邀请码', inviteExpires: '到期', inviteHint: '把邀请码发给对方，24 小时内有效，用一次就失效。',
-      joinUrl: '对方地址', joinToken: '邀请码', joinKind: '对方是', ssh: '走 SSH 隧道（可选）',
+      inviteExpires: '到期', inviteHint: '把邀请链接发给对方，24 小时内有效，用一次就失效。',
+      joinUrl: '对方地址', joinKind: '对方是', ssh: '走 SSH 隧道（可选）',
       sshHost: 'SSH 主机', sshUser: '用户', sshIdentity: '私钥文件', sshPort: 'SSH 端口',
-      sshHint: '调用系统 OpenSSH，首次连接自动记录主机指纹，之后指纹变化会拒绝；插件不保存你的私钥。',
-      secureHint: '公网用 HTTPS，可信局域网才用明文 HTTP，或用 SSH 隧道。拿到邀请码的人就能连，请私下发送。',
+      sshHint: '用下面填写的私钥路径调用系统 OpenSSH；首次连接自动记录主机指纹，之后指纹变化会拒绝。插件不保存你的私钥。',
+      secureHint: '公网用 HTTPS，可信局域网才用明文 HTTP，或用 SSH 隧道。拿到邀请链接的人就能连，请私下发送。',
       advice: '建议', adviceHint: '按这台设备的现状给出，点一下就应用',
       notIncluded: '个插件还没纳入同步', adoptAll: '全部纳入', allIncluded: '都已纳入',
       askAgent: '让 agent 给建议', regenerate: '重新生成', showList: '查看', hideList: '收起',
       adviceScope: '建议纳入 {sync} 个，留本机 {local} 个', adviceEmpty: '没有可建议的内容',
-      adopt: '纳入', keepLocal: '留本机', dismiss: '先不用', fromModel: '模型建议',
+      adopt: '纳入', keepLocal: '留本机', dismiss: '先不用',
       scope: '同步范围', scopeHint: '决定这台设备和对方之间传什么',
 
       direction: '方向', both: '双向', push: '只推送', pull: '只拉取',
@@ -166,7 +169,7 @@ window.__ModuleLoader__.load({
       memoryLayerContextual: '情景', memoryLayerGoals: '目标', memoryLayerUnresolved: '未解',
       memoryLayerKnowledge: '知识', memoryLayerStructural: '结构',
       sync: '同步', syncHint: '先看差异，再决定改哪些',
-      incoming: '对方发来的变更', from: '来自', accept: '接受并发布', reject: '拒绝',
+      incoming: '对方发来的变更', from: '来自', accept: '接受并发布', acceptInstall: '接受并本机安装', reject: '拒绝',
       noIncoming: '暂时没有', conflict: '冲突', conflictHint: '只显示版本指纹，不显示配置内容。',
       keepMine: '保留本机', useTheirs: '采用对方', bothChanged: '两边都改过',
       compare: '看差异', sendTheirs: '发给对方', publishLocal: '发布本机改动', applySelected: '把这 {n} 项改到本机',
@@ -189,8 +192,6 @@ window.__ModuleLoader__.load({
       allowed: '允许同步的改动', install: '安装新插件', upgrade: '升级插件',
       enable: '启用插件', disable: '停用插件', configSet: '写入插件配置',
       rules: '规则', excludeLabel: '不同步这些（每行一条，可用 * 通配）', localOnlyLabel: '只留在这台设备（每行一条）',
-      model: '模型复核', modelHint: '会把插件元数据发给供应商，可能产生费用。',
-      modelEnable: '用模型复核建议', provider: '供应商', modelId: '模型',
       noProtected: '系统插件始终不同步。',
       heroTitle: '设备同步',
       heroHint: '先决定这台设备怎么连，再决定同步什么。改动点选即保存。',
@@ -214,14 +215,19 @@ window.__ModuleLoader__.load({
       guideNetwork: '走哪条网络',
       netLan: '局域网', netLanDesc: '可信内网里直接用 http:// 地址',
       netSsh: 'SSH 隧道', netSshDesc: '用密钥登录，远端只监听本机',
-      netPublic: '公网', netPublicDesc: 'HTTPS 地址加邀请码，邀请码不要外传',
-      lanHint: '局域网用 http://设备IP:3080。邀请码是唯一凭据，请私下发送。',
+      netPublic: '公网', netPublicDesc: 'HTTPS 地址加邀请链接，链接不要外传',
+      lanHint: '局域网用 http://设备IP:3081（同步独立端口）。邀请链接是唯一凭据，请私下发送。',
       sshModeHint: 'SSH 用你的私钥作凭据，填好 SSH 主机、用户、密钥路径和端口（默认 22）。',
-      publicHint: '公网请用 https:// 地址并带邀请码，拿到邀请码的人就能连。',
+      publicHint: '公网请用 https:// 同步端口地址并带邀请链接，拿到链接的人就能连。',
       inviteLink: '邀请链接', inviteLinkHint: '粘贴对方发来的完整链接',
       parseLink: '解析链接', linkParsed: '链接已解析，连接前请先验证。',
       verifyLink: '验证链接', verified: '已验证',
       'verify-failed': '链接或邀请码验证失败。',
+      'ssh-client-not-found': '没找到系统 ssh 客户端，请安装 OpenSSH 并确保 ssh 在 PATH 中。',
+      'pick-file-unavailable': '本机无法打开文件选择框，请直接填写私钥绝对路径。',
+      'pick-file-failed': '读取所选路径失败，请直接填写私钥绝对路径。',
+      'request-failed': '同步服务拒绝了这次请求。',
+      pickFile: '选择文件', askAgentHint: '开一个新对话，带上本机插件清单让 AI 给建议。',
       copyLink: '复制链接', copied: '链接已复制。', 'copy-failed': '复制失败。',
       hostAddress: '其他设备访问本机的地址',
       resetSync: '重置同步', resetConfirm: '确认重置', cancel: '取消',
@@ -326,12 +332,13 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
 @media (max-width:880px){.ps-grid{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:640px){.ps-card{padding:12px}.ps-hd .hint{display:none}.ps-guide{padding:12px}.ps-guide-opt{padding:8px}}
 `
+    let startAdviceChat = () => {}
     const caps = ['install', 'upgrade', 'enable', 'disable', 'configSet', 'memoryWrite']
     const listFields = ['exclude', 'localOnly']
     const GUIDE_KEY = 'dsh-plugin-sync:guide-dismissed:v1'
     const defaultConnection = () => ({
       setup: null, preset: null, mode: 'lan', link: '', verified: false, host: '',
-      form: { kind: 'joinCenter', url: '', token: '', ssh: false, host: '', user: '', identityFile: '', port: '22', remotePort: '3080' },
+      form: { kind: 'joinCenter', url: '', token: '', ssh: false, host: '', user: '', identityFile: '', port: '22', remotePort: '3081' },
     })
     function parseInviteLink(raw) {
       try {
@@ -348,7 +355,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         if (!base || !token) return null
         if (/^ssh:\/\//i.test(base)) {
           const parsed = new URL(base)
-          const remotePort = Number(query.remote) >= 1 && Number(query.remote) <= 65535 ? query.remote : '3080'
+          const remotePort = Number(query.remote) >= 1 && Number(query.remote) <= 65535 ? query.remote : '3081'
           const port = Number(query.port) >= 1 && Number(query.port) <= 65535 ? query.port : '22'
           return {
             url: `http://127.0.0.1:${remotePort}`, token,
@@ -399,7 +406,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
     function actionStatusError(action, status) {
       const ok = {
         check: ['ok'], apply: ['ok', 'partial', 'needsRestart'], proposal: ['pending', 'duplicate', 'conflict', 'queued'],
-        acceptProposal: ['accepted', 'published', 'ok'], rejectProposal: ['rejected', 'ok'],
+        acceptProposal: ['accepted', 'published', 'ok'], acceptAndInstall: ['accepted'], rejectProposal: ['rejected', 'ok'],
         publishLocal: ['published', 'updated', 'queued', 'ok'], revokePeer: ['revoked', 'ok'], archiveDecisions: ['archived'],
         suggest: ['ok'], adopt: ['ok'],
       }
@@ -476,6 +483,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
               .map((item) => ({
                 key: item.key, entryId: item.entryId, bundle: item.bundle ?? '',
                 fields: item.fields.filter((path) => Array.isArray(path) && path.length > 0 && path.every((seg) => typeof seg === 'string' && seg)),
+                eligible: item.eligible === true,
               })),
             lingshu,
           })
@@ -524,7 +532,9 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
     function Feedback({ area, ctl, t }) {
       const entry = ctl.feedback[area]
       if (ctl.busy === area) return note(t('busy'))
-      if (entry?.error) return note(statusText(t, entry.error), 'warn')
+      // Unknown codes keep the machine-readable reason visible: a bare
+      // "operation failed" hides exactly the detail needed to fix a link.
+      if (entry?.error) return note(safeLabels.has(entry.error) ? t(entry.error) : `${t('failed')} (${entry.error})`, 'warn')
       if (entry?.text) return note(statusText(t, entry.text, 'done'))
       return null
     }
@@ -586,9 +596,9 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         exclude: (policy.exclude ?? []).join('\n'),
         localOnly: (policy.localOnly ?? []).join('\n'),
         configFields: structuredCloneSafe(policy.configFields ?? {}),
-        configIncluded: (policy.include ?? []).filter((key) => Object.hasOwn(policy.configFields ?? {}, key)),
+        configIncluded: (policy.include ?? []).filter((key) => Object.hasOwn(policy.configFields ?? {}, key) &&
+          (!(inventory?.configs ?? []).length || (inventory.configs).some((entry) => entry.entryId === key && entry.eligible))),
         memoryLayers: [...(policy.lingshu?.layers ?? [])],
-        ai: { ...(policy.ai ?? { enabled: false, provider: '', model: '' }) },
       }
     }
     function structuredCloneSafe(value) {
@@ -620,7 +630,6 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         autoApply: Boolean(draft.autoApply),
         mode: draft.autoApply ? 'managed' : 'selective',
         default: 'deny',
-        ai: { ...policy.ai, ...draft.ai },
       }
     }
     function lines(text) {
@@ -686,19 +695,30 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const suggestions = Array.isArray(state.suggestions) ? state.suggestions : []
       const [open, setOpen] = useState(false)
       const addAll = () => draftCtl.update({ selected: [...new Set([...(draftCtl.draft?.selected ?? []), ...missing.map((item) => item.key)])] }, true)
-      const suggest = () => ctl.run('advice', async () => { await call('suggest') })
+      const ask = () => {
+        const plugins = (inventory?.plugins ?? []).map((item) => `- ${item.key} (${item.enabled ? 'enabled' : 'disabled'})`).join('\n')
+        const prompt = [
+          'Analyze the plugins installed on this device and suggest which should join cross-device sync and which must stay local.',
+          'Ignore IM/chat/memory/Lingshu plugins and anything bound to one machine or already in its own sync domain; do not emit suggestions for them.',
+          'Return a JSON array only: [{"key":"...","action":"sync|localOnly|skip","reason":"..."}]',
+          'Installed plugins:',
+          plugins || '(none)',
+        ].join('\n')
+        startAdviceChat(prompt)
+      }
       const adopt = (ids) => ctl.run('advice', async () => { await call('adopt', { ids }) }, { success: 'saved' })
       const syncCount = suggestions.filter((item) => item.action === 'sync').length
       const localCount = suggestions.filter((item) => item.action === 'localOnly').length
       const actions = []
       if (suggestions.length) actions.push(h(Button, { key: 'toggle', quiet: true, onClick: () => setOpen((value) => !value) }, t(open ? 'hideList' : 'showList')))
-      actions.push(h(Button, { key: 'ask', onClick: suggest, disabled: Boolean(ctl.busy) }, t(suggestions.length ? 'regenerate' : 'askAgent')))
+      actions.push(h(Button, { key: 'ask', onClick: ask }, t('askAgent')))
       return h(Card, { title: t('advice'), hint: t('adviceHint'), actions },
         h('div', { className: 'ps-split' },
           h('span', { className: 'txt' }, missing.length
             ? h('span', {}, h('b', {}, String(missing.length)), ' ', t('notIncluded'))
             : h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, t('allIncluded'))),
           missing.length > 0 && h(Button, { onClick: addAll, disabled: Boolean(ctl.busy) }, t('adoptAll'))),
+        note(t('askAgentHint')),
         suggestions.length > 0 && h('div', { className: 'ps-split' },
           h('span', { className: 'txt' }, fmt(t('adviceScope'), { sync: syncCount, local: localCount })),
           h(Button, { quiet: true, onClick: () => setOpen((value) => !value) }, t(open ? 'hideList' : 'showList'))),
@@ -707,12 +727,10 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             h('span', { className: 'name' }, item.key),
             h(Badge, { tone: item.action === 'sync' ? 'ok' : item.action === 'localOnly' ? 'warn' : '' },
               t(item.action === 'sync' ? 'adopt' : item.action === 'localOnly' ? 'keepLocal' : 'dismiss')),
-            item.source === 'model' && h(Badge, {}, t('fromModel')),
             h('span', { style: { width: '100%', fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' } }, item.reason),
             h(Button, { quiet: true, onClick: () => adopt([item.id]), disabled: Boolean(ctl.busy) },
               t(item.action === 'localOnly' ? 'keepLocal' : 'adopt'))))),
-        h(Feedback, { area: 'advice', ctl, t }),
-        state.policy.ai?.enabled && note(t('modelHint')))
+        h(Feedback, { area: 'advice', ctl, t }))
     }
 
     function layerLabel(t, layer) {
@@ -786,7 +804,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             try { data = JSON.parse(String(reader.result)) } catch { data = null }
             if (!data || !Array.isArray(data.plugins)) { update({ selected }, true); return }
             const known = pluginKeys(inventory)
-            const configIds = new Set((inventory?.configs ?? []).map((entry) => entry.entryId))
+            const configIds = new Set((inventory?.configs ?? []).filter((entry) => entry.eligible).map((entry) => entry.entryId))
             const configIncluded = (Array.isArray(data.config) ? data.config : []).filter((key) => typeof key === 'string' && configIds.has(key))
             const configFields = structuredCloneSafe(draft.configFields ?? {})
             for (const entry of inventory?.configs ?? []) {
@@ -800,7 +818,10 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         })
         input.click()
       }
-      const configsFor = (pluginKey) => (inventory?.configs ?? []).filter((entry) => entry.bundle === pluginKey || entry.key === pluginKey)
+      // Only configs with multiple non-secret fields offer "同步设置". A single
+      // field is a tweak, not a switchable settings surface (matches engine gate).
+      const configsFor = (pluginKey) => (inventory?.configs ?? []).filter((entry) =>
+        entry.eligible && (entry.bundle === pluginKey || entry.key === pluginKey))
       const settingsOn = (pluginKey) => configsFor(pluginKey).some((entry) =>
         (draft.configFields?.[entry.entryId] ?? []).length > 0 && (draft.configIncluded ?? []).includes(entry.entryId))
       const toggleSettings = (pluginKey, on) => {
@@ -841,6 +862,19 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           })),
         hidden > 0 && h(Button, { quiet: true, onClick: () => setExpanded(true) }, fmt(t('more'), { n: hidden })),
         expanded && all.length > 8 && h(Button, { quiet: true, onClick: () => setExpanded(false) }, t('showLess')),
+        h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l1,#eef0f4)' } },
+          h('div', { className: 'ps-sub' }, t('allowed')),
+          h('div', { className: 'ps-row' },
+            caps.map((cap) => h('label', { key: cap, className: 'ps-check' },
+              h('input', { type: 'checkbox', checked: Boolean(draft.caps?.[cap]), disabled, onChange: (event) => update({ caps: { ...draft.caps, [cap]: event.target.checked } }, true) }),
+              t(cap)))),
+          note(t('noProtected')),
+          h('div', { className: 'ps-sub', style: { marginTop: 10 } }, t('rules')),
+          h('div', { className: 'ps-row', style: { alignItems: 'flex-start' } },
+            h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('excludeLabel')),
+              h('textarea', { className: 'ps-input', rows: 3, value: draft.exclude, disabled, onChange: (event) => update({ exclude: event.target.value }) })),
+            h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('localOnlyLabel')),
+              h('textarea', { className: 'ps-input', rows: 3, value: draft.localOnly, disabled, onChange: (event) => update({ localOnly: event.target.value }) })))),
         h(MemoryScope, { t, inventory, draft, update, disabled }),
         all.length > 0 && selected.length === 0 && note(t('noneWarn'), 'warn'),
         h('div', { className: 'ps-row', style: { marginTop: 12 } },
@@ -923,6 +957,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
               h('b', {}, t('incoming')), ' ', t('from'), ' ', proposal.origin?.label ?? '—',
               h('br'), h('span', { style: { color: 'var(--dsw-alias-label-tertiary)', fontSize: 11.5 } }, (proposal.keys ?? []).join('、'))),
             h(Button, { primary: true, disabled: Boolean(ctl.busy), onClick: act(ctl, 'incoming', 'acceptProposal', { proposalId: proposal.id }, { success: (value) => value?.status ?? 'done' }) }, t('accept')),
+            (proposal.resources ?? []).some((entry) => entry.kind === 'plugin') && h(Button, { quiet: true, disabled: Boolean(ctl.busy), onClick: act(ctl, 'incoming', 'acceptAndInstall', { proposalId: proposal.id }, { success: (value) => value?.status ?? 'done' }) }, t('acceptInstall')),
             h(Button, { quiet: true, disabled: Boolean(ctl.busy), onClick: act(ctl, 'incoming', 'rejectProposal', { proposalId: proposal.id }, { success: 'rejected' }) }, t('reject')))),
           conflicts.map((conflict) => h('div', { key: conflict.id, className: 'ps-split' },
             h('span', { className: 'txt' }, h('b', {}, t('conflict')), ' · ', conflict.key),
@@ -938,6 +973,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
 
     function Connections({ ctl, t, connection, setConnection, onReopen, onReset }) {
       const { state } = ctl
+      const syncPort = state.syncPort ?? 3081
       const role = state.identity.role
       const paired = role !== 'unpaired'
       const host = role === 'center' || (role === 'peer' && !state.center)
@@ -949,17 +985,17 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const setForm = (value) => patch({ form: value, verified: false })
       const setMode = (next) => setConnection((prior) => {
         const updated = { ...prior.form }
-        if (next === 'ssh') { updated.ssh = true; updated.url = 'http://127.0.0.1:3080' }
+        if (next === 'ssh') { updated.ssh = true; updated.url = `http://127.0.0.1:${syncPort}` }
         else {
           updated.ssh = false
-          if (updated.url === 'http://127.0.0.1:3080') updated.url = ''
+          if (updated.url === `http://127.0.0.1:${syncPort}`) updated.url = ''
         }
         return { ...prior, mode: next, verified: false, form: updated }
       })
       const peers = Object.values(state.peers ?? {})
       const peerLimit = role === 'peer' && (Boolean(state.center) || peers.some((peer) => peer.status === 'connected'))
       const disabled = Boolean(ctl.busy)
-      const sshArgs = () => form.ssh ? { kind: 'ssh', host: form.host.trim(), user: form.user.trim(), identityFile: form.identityFile.trim(), port: Number(form.port) || 22, remotePort: Number(form.remotePort) || 3080 } : undefined
+      const sshArgs = () => form.ssh ? { kind: 'ssh', host: form.host.trim(), user: form.user.trim(), identityFile: form.identityFile.trim(), port: Number(form.port) || 22, remotePort: Number(form.remotePort) || syncPort } : undefined
       const createInvite = () => ctl.run('connection', async () => {
         const value = await call('invite')
         if (typeof value?.token !== 'string' || !value.token) throw { code: 'bad-response' }
@@ -992,12 +1028,17 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         const token = encodeURIComponent(invite.token)
         if (mode === 'ssh') {
           const user = form.user.trim() ? `${form.user.trim()}@` : ''
-          return `ssh://${user}${form.host.trim() || 'host'}/plugin-sync/join?invite=${token}&remote=${form.remotePort || '3080'}&port=${form.port || '22'}`
+          return `ssh://${user}${form.host.trim() || 'host'}/plugin-sync/join?invite=${token}&remote=${form.remotePort || syncPort}&port=${form.port || '22'}`
         }
-        const base = (connection.host || originHint() || 'http://127.0.0.1:3080').replace(/\/$/, '')
-        const withScheme = /^https?:\/\//i.test(base) ? base : `${mode === 'public' ? 'https://' : 'http://'}${base}`
-        return `${withScheme}/plugin-sync/join?invite=${token}`
+        const raw = (connection.host || originHint() || `http://127.0.0.1:${syncPort}`).replace(/\/$/, '')
+        const withScheme = /^https?:\/\//i.test(raw) ? raw : `${mode === 'public' ? 'https://' : 'http://'}${raw}`
+        const base = withScheme.replace(/^(https?:\/\/(?:\[[^\]]+\]|[^/?#:]+))(?:\:\d+)?/, `$1:${syncPort}`)
+        return `${base.replace(/\/$/, '')}/plugin-sync/join?invite=${token}`
       }
+      const pickFile = () => ctl.run('pickFile', async () => {
+        const value = await call('pickFile')
+        if (value?.path) setForm({ ...form, identityFile: value.path })
+      }, { reload: false, success: 'done' })
       const copyLink = () => ctl.run('copy', async () => {
         try {
           if (typeof navigator === 'undefined' || !navigator.clipboard) throw { code: 'copy-failed' }
@@ -1037,22 +1078,24 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
               h('select', { className: 'ps-input', value: form.kind, onChange: (event) => setForm({ ...form, kind: event.target.value }) },
                 h('option', { value: 'joinCenter' }, t('center')), h('option', { value: 'connectPeer' }, t('peer')))),
             h('label', { className: 'ps-field', style: { flex: '1 1 240px' } }, h('span', {}, t('joinUrl')),
-              h('input', { className: 'ps-input', value: form.url, onChange: (event) => setForm({ ...form, url: event.target.value }), placeholder: mode === 'public' ? 'https://sync.example.com:3080' : 'http://192.0.2.10:3080' }))),
-          h('div', { className: 'ps-row', style: { marginTop: 8 } },
-            h('label', { className: 'ps-field', style: { flex: '1 1 240px' } }, h('span', {}, t('joinToken')),
-              h('input', { className: 'ps-input', value: form.token, autoComplete: 'off', onChange: (event) => setForm({ ...form, token: event.target.value }) }))),
+              h('input', { className: 'ps-input', value: form.url, onChange: (event) => setForm({ ...form, url: event.target.value }), placeholder: mode === 'public' ? `https://sync.example.com:${syncPort}` : `http://192.0.2.10:${syncPort}` }))),
           h('details', { style: { marginTop: 8 }, open: mode === 'ssh' }, h('summary', { style: { fontSize: 12, cursor: 'pointer' } }, t('ssh')),
             h('div', { className: 'ps-row', style: { marginTop: 8 } },
               h('label', { className: 'ps-check' }, h('input', { type: 'checkbox', checked: form.ssh, onChange: (event) => setForm({ ...form, ssh: event.target.checked }) }), t('ssh')),
-              ['host', 'user', 'identityFile', 'port'].map((key) => h('label', { key, className: 'ps-field', style: { flex: '1 1 150px' } },
-                h('span', {}, t(key === 'host' ? 'sshHost' : key === 'user' ? 'sshUser' : key === 'identityFile' ? 'sshIdentity' : 'sshPort')),
-                h('input', { className: 'ps-input', value: form[key], disabled: !form.ssh, onChange: (event) => setForm({ ...form, [key]: event.target.value }) })))),
+              ['host', 'user', 'port'].map((key) => h('label', { key, className: 'ps-field', style: { flex: '1 1 150px' } },
+                h('span', {}, t(key === 'host' ? 'sshHost' : key === 'user' ? 'sshUser' : 'sshPort')),
+                h('input', { className: 'ps-input', value: form[key], disabled: !form.ssh, onChange: (event) => setForm({ ...form, [key]: event.target.value }) }))),
+              h('label', { className: 'ps-field', style: { flex: '1 1 240px' } }, h('span', {}, t('sshIdentity')),
+                h('div', { className: 'ps-row' },
+                  h('input', { className: 'ps-input', style: { flex: 1 }, value: form.identityFile, disabled: !form.ssh, onChange: (event) => setForm({ ...form, identityFile: event.target.value }) }),
+                  h(Button, { quiet: true, disabled: disabled || !form.ssh, onClick: pickFile }, t('pickFile'))))),
             note(t('sshHint'))),
           h('div', { className: 'ps-row', style: { marginTop: 10 } },
             h(Button, { disabled: disabled || !form.url.trim() || !form.token.trim(), onClick: verify }, t('verifyLink')),
             verified && h(Badge, { tone: 'ok' }, t('verified')),
             h(Button, { primary: true, disabled: disabled || !verified || !form.url.trim() || !form.token.trim(), onClick: join }, t('joinCenter'))),
           h(Feedback, { area: 'link', ctl, t }),
+          h(Feedback, { area: 'pickFile', ctl, t }),
           h(Feedback, { area: 'verify', ctl, t })),
         paired && h('div', {},
           peers.length === 0 && !state.center ? note(t('noPeers')) : h('ul', { className: 'ps-list' },
@@ -1071,9 +1114,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
               invite && h(Button, { quiet: true, onClick: () => setInvite(null) }, t('hideInvite'))),
             invite && h('div', { style: { marginTop: 8 } },
               h('label', { className: 'ps-field' }, h('span', {}, t('hostAddress')),
-                h('input', { className: 'ps-input', value: connection.host || originHint(), placeholder: 'http://192.0.2.10:3080', onChange: (event) => patch({ host: event.target.value }) })),
-              h('label', { className: 'ps-field', style: { marginTop: 8 } }, h('span', {}, t('joinToken')),
-                h('code', { className: 'ps-mono ps-code' }, invite.token)),
+                h('input', { className: 'ps-input', value: connection.host || originHint(), placeholder: `http://192.0.2.10:${syncPort}`, onChange: (event) => patch({ host: event.target.value }) })),
               h('label', { className: 'ps-field', style: { marginTop: 8 } }, h('span', {}, t('inviteLink')),
                 h('code', { className: 'ps-mono ps-code' }, inviteLink())),
               h('div', { className: 'ps-row', style: { marginTop: 8 } },
@@ -1139,31 +1180,6 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
               h('label', { className: 'ps-field' }, h('span', {}, t('interval')),
                 h('select', { className: 'ps-input', value: draft.intervalMs, disabled, onChange: (event) => update({ intervalMs: Number(event.target.value) }, true) },
                   units.map((ms) => h('option', { key: ms, value: ms }, intervalText(ms))))))),
-          h('div', {},
-            h('div', { className: 'ps-sub' }, t('allowed')),
-            h('div', { className: 'ps-row' },
-              caps.map((cap) => h('label', { key: cap, className: 'ps-check' },
-                h('input', { type: 'checkbox', checked: Boolean(draft.caps?.[cap]), disabled, onChange: (event) => update({ caps: { ...draft.caps, [cap]: event.target.checked } }, true) }),
-                t(cap)))),
-            note(t('noProtected'))),
-          h('div', {},
-            h('div', { className: 'ps-sub' }, t('rules')),
-            h('div', { className: 'ps-row', style: { alignItems: 'flex-start' } },
-              h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('excludeLabel')),
-                h('textarea', { className: 'ps-input', rows: 3, value: draft.exclude, disabled, onChange: (event) => update({ exclude: event.target.value }) })),
-              h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('localOnlyLabel')),
-                h('textarea', { className: 'ps-input', rows: 3, value: draft.localOnly, disabled, onChange: (event) => update({ localOnly: event.target.value }) })))),
-          h('div', {},
-            h('div', { className: 'ps-sub' }, t('model')),
-            h('div', { className: 'ps-row' },
-              h('label', { className: 'ps-check' },
-                h('input', { type: 'checkbox', checked: Boolean(draft.ai?.enabled), disabled, onChange: (event) => update({ ai: { ...draft.ai, enabled: event.target.checked } }, true) }),
-                t('modelEnable')),
-              h('label', { className: 'ps-field' }, h('span', {}, t('provider')),
-                h('input', { className: 'ps-input', value: draft.ai?.provider ?? '', disabled, onChange: (event) => update({ ai: { ...draft.ai, provider: event.target.value } }) })),
-              h('label', { className: 'ps-field' }, h('span', {}, t('modelId')),
-                h('input', { className: 'ps-input', value: draft.ai?.model ?? '', disabled, onChange: (event) => update({ ai: { ...draft.ai, model: event.target.value } }) }))),
-            note(t('modelHint'))),
           error && note(statusText(t, error), 'warn'),
           h(Feedback, { area: 'policy', ctl, t })))
     }
@@ -1188,7 +1204,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             ...prior.form,
             kind: preset.mode === 'center' ? 'joinCenter' : 'connectPeer',
             ssh: network === 'ssh',
-            url: network === 'ssh' ? 'http://127.0.0.1:3080' : prior.form.url,
+            url: network === 'ssh' ? `http://127.0.0.1:${state.syncPort ?? 3081}` : prior.form.url,
           }
           return {
             ...prior, preset, mode: network, verified: false, form,
@@ -2657,11 +2673,19 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
     try { __muteClient = lingshuMuteClientFactory(require); }
     catch (err) { console.warn('lingshu-mute: merged client factory failed', err); }
     return {
-      inject: ['slots', 'locale', 'sessions', 'workspaces', 'remote', 'remote.commands'],
+      inject: ['slots', 'locale', 'sessions', 'workspaces', 'remote', 'remote.commands', 'uiWorkspace'],
       apply(ctx) {
         // --- device sync's own UI ---
         ctx.effect(() => ctx.locale.register(NS, { zh, en }), 'device-sync: dictionaries')
         const t = ctx.locale.bind(NS)
+        // uiWorkspace is declared in inject, so the Client guard exposes it as a
+        // direct property; ctx.get() would be rejected without the declaration.
+        const workspace = ctx.uiWorkspace ?? null
+        startAdviceChat = (prompt) => {
+          if (!workspace || typeof workspace.startSession !== 'function') return false
+          workspace.startSession(undefined, { prompt, whenDraftExists: 'append' })
+          return true
+        }
         const name = 'plugins.tab'
         ctx.slots.inject(name, () => ctx.slots.register({
           name, id: 'device-sync', order: 20, label: () => t('tab'), locale: NS,

@@ -85,11 +85,11 @@ test('advisor classifies plugin suggestions and adoption edits include and local
   assert.equal(actionOf('@deepseek-ai/official'), 'localOnly')
   assert.equal(actionOf('pinned-plugin'), 'localOnly')
   assert.equal(actionOf('disabled-plugin'), 'skip')
-  // Ordinary plugins are suggested for sync; device-bound ones stay local.
+  // Ordinary plugins are suggested for sync; device-bound ones are hidden.
   assert.equal(actionOf('enabled-plugin'), 'sync')
-  assert.equal(actionOf('@xmanrui/dsh-im'), 'localOnly')
-  assert.equal(actionOf('@furongjun1999/dsh-memory'), 'localOnly')
-  assert.equal(actionOf('dsh-telegram'), 'localOnly')
+  assert.equal(actionOf('@xmanrui/dsh-im'), undefined)
+  assert.equal(actionOf('@furongjun1999/dsh-memory'), undefined)
+  assert.equal(actionOf('dsh-telegram'), undefined)
   assert.equal(actionOf('already-included'), undefined)
   assert.deepEqual(validateAdopted(suggestions, ['unknown-suggestion']), [])
 
@@ -106,9 +106,6 @@ test('advisor classifies plugin suggestions and adoption edits include and local
     ['pinned-plugin', 'localOnly'],
     ['disabled-plugin', 'skip'],
     ['enabled-plugin', 'sync'],
-    ['@xmanrui/dsh-im', 'localOnly'],
-    ['@furongjun1999/dsh-memory', 'localOnly'],
-    ['dsh-telegram', 'localOnly'],
   ])
   // Suggestions stay advisory until a human adopts them.
   assert.deepEqual(engine.publicState().policy.include, ['already-included'])
@@ -121,8 +118,7 @@ test('advisor classifies plugin suggestions and adoption edits include and local
   const next = engine.publicState().policy
   assert.deepEqual([...next.include].sort(), ['already-included', 'enabled-plugin'])
   assert.deepEqual([...next.localOnly].sort(), [
-    '@deepseek-ai/official', '@furongjun1999/dsh-memory', '@local/dsh-plugin-sync',
-    '@xmanrui/dsh-im', 'dsh-telegram', 'pinned-plugin',
+    '@deepseek-ai/official', '@local/dsh-plugin-sync', 'pinned-plugin',
   ])
   assert.equal(next.include.includes('disabled-plugin'), false)
   assert.equal(next.localOnly.includes('disabled-plugin'), false)
