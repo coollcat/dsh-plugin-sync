@@ -370,6 +370,7 @@ export function apply(ctx, config) {
       case 'loadSnapshot': return engine.loadSnapshot(args.text)
       case 'suggest': return engine.suggest()
       case 'adopt': return engine.adoptSuggestions({ ids: args.ids, actor: 'user' })
+      case 'importSuggestions': return engine.importSuggestions({ text: args.text, actor: 'user' })
       case 'acceptProposal': return engine.handleAcceptProposal({ proposalId: args.proposalId, actor: 'user', installLocally: args.installLocally === true })
       case 'acceptAndInstall': return engine.acceptAndInstall({ proposalId: args.proposalId, actor: 'user' })
       case 'resolveConflict': return engine.resolveConflict({ conflictId: args.conflictId, choice: args.choice, actor: 'user' })

@@ -145,6 +145,14 @@ async function mount(t, start, respond, { slot = 'plugins.tab', language = 'en',
       })
       await flush()
     },
+    fillTextarea: async (placeholder, value) => {
+      await React.act(async () => {
+        const node = rendered.root.findAllByType('textarea').find((element) => element.props.placeholder === placeholder)
+        assert.ok(node, `missing textarea ${placeholder}`)
+        node.props.onChange({ target: { value } })
+      })
+      await flush()
+    },
     fill: async (placeholder, value) => {
       await React.act(async () => {
         const input = rendered.root.findAllByType('input').find((element) => element.props.placeholder === placeholder)
@@ -449,6 +457,44 @@ hookTest('SSH key path has a host-side picker and no separate invitation code fi
 hookTest('scope owns rules and allowed changes, advanced no longer offers model review', async (t) => {
   const ui = await mount(t, state('center'), answer(state('center')))
   assert.ok(ui.all().includes('Changes allowed to sync'))
-  assert.ok(ui.all().includes('Never sync these (one per line, * allowed)'))
+  assert.ok(ui.all().includes('Never sync these'))
+  assert.ok(ui.all().includes('No rules'))
   assert.equal(ui.all().includes('Use a model to review suggestions'), false)
+})
+
+
+hookTest('agent advice imports an agent JSON array and adopts it', async (t) => {
+  const start = state('center', { suggestions: [] })
+  let current = start
+  const importedRows = [{ id: 's1', key: 'alpha', action: 'sync', reason: 'from AI', source: 'import' }]
+  const ui = await mount(t, start, (body) => {
+    if (body.action === 'state') return success(current)
+    if (body.action === 'inventory') return success(INVENTORY)
+    if (body.action === 'importSuggestions') {
+      current = { ...start, suggestions: importedRows }
+      return success({ imported: importedRows, skipped: ['unknown'] })
+    }
+    if (body.action === 'adopt') return success({ ok: true })
+    return success({ status: 'ok' })
+  })
+  await ui.click('Import JSON')
+  await ui.fillTextarea('Paste the JSON array returned by the agent.', '[{"key":"alpha","action":"sync","reason":"from AI"}]')
+  await ui.click('Import suggestions')
+  const imported = ui.requests.filter((item) => item.action === 'importSuggestions').at(-1)
+  assert.equal(imported.text, '[{"key":"alpha","action":"sync","reason":"from AI"}]')
+  assert.ok(ui.all().includes('Imported 1 suggestions.'), ui.all())
+  assert.ok(ui.all().includes('Imported'))
+  await ui.click('Adopt all')
+  assert.deepEqual(ui.requests.filter((item) => item.action === 'adopt').at(-1).ids, ['s1'])
+})
+
+hookTest('rules are added as GUI chips instead of raw textareas', async (t) => {
+  const start = state('center', { policy: policy({ exclude: ['alpha'], localOnly: ['beta'] }) })
+  const ui = await mount(t, start, answer(start))
+  await ui.fill('Plugin name or * pattern', 'gamma*')
+  await ui.click('Add')
+  const written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.ok(written.policy.exclude.includes('gamma*'))
+  assert.ok(ui.all().includes('gamma*'))
+  assert.equal(ui.all().includes('one per line'), false)
 })

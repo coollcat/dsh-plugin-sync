@@ -124,3 +124,33 @@ test('advisor classifies plugin suggestions and adoption edits include and local
   assert.equal(next.localOnly.includes('disabled-plugin'), false)
   assert.deepEqual(engine.publicState().suggestions.map(({ key }) => key), ['disabled-plugin'])
 })
+
+
+test('JSON suggestions are validated, filtered and stay advisory until adopted', async () => {
+  const records = [pluginRecord('alpha'), pluginRecord('beta'), pluginRecord('@xmanrui/dsh-im')]
+  const store = { read: () => null, write() {} }
+  const engine = createEngine({ store, adapters: {
+    profileId: 'import', label: 'Import',
+    collectInventory: async () => structuredClone(records), collectConfig: async () => [],
+  } })
+  const text = JSON.stringify([
+    { key: 'alpha', action: 'sync', reason: 'portable' },
+    { key: 'beta', action: 'localOnly', reason: 'local' },
+    { key: '@xmanrui/dsh-im', action: 'sync', reason: 'IM must stay local' },
+    { key: 'unknown', action: 'sync', reason: 'not installed' },
+    { key: 'gamma', action: 'bogus', reason: 'bad action' },
+  ])
+  const result = await engine.importSuggestions({ text, actor: 'user' })
+  assert.deepEqual(result.imported.map((item) => [item.key, item.action, item.source]), [
+    ['alpha', 'sync', 'import'], ['beta', 'localOnly', 'import'],
+  ])
+  assert.equal(result.skipped.length, 3)
+  assert.deepEqual(engine.publicState().policy.include, [])
+  assert.deepEqual(engine.publicState().policy.localOnly, [])
+  const ids = result.imported.map((item) => item.id)
+  assert.equal(engine.adoptSuggestions({ ids, actor: 'agent' }).reason, 'user-required')
+  assert.equal(engine.adoptSuggestions({ ids, actor: 'user' }).ok, true)
+  assert.deepEqual(engine.publicState().policy.include, ['alpha'])
+  assert.deepEqual(engine.publicState().policy.localOnly, ['beta'])
+  assert.equal((await engine.importSuggestions({ text: '{', actor: 'user' })).reason, 'invalid-json')
+})

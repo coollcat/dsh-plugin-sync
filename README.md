@@ -1,4 +1,4 @@
-# DSH 设备同步
+# dsh-plugin-sync（DSH 设备同步）
 
 在多个 DSH profile 之间同步第三方插件的版本/启停状态和明确选择的插件配置字段。支持一个中心管理多个设备，或两台设备点对点交换。远端提供候选状态，本机策略和审批决定是否写入。
 
@@ -104,3 +104,13 @@ npm pack --dry-run
 - [变更记录](CHANGELOG.md)
 
 This bundle provides policy-controlled DSH profile synchronization. Installation, settings and limitations are documented above; the Web UI also includes English labels.
+
+---
+
+## 工作区说明（workspace）
+
+- **工程名（目录）**：`dsh-plugin-sync`（包名 `@local/dsh-plugin-sync`）
+- **用途**：策略控制的 DSH profile 同步——本机审批、插件范围白名单、配置字段白名单与灵枢记忆节点同步。
+- **引用关系（~/.dsh/profiles/web）**：**被引用（github 来源，非 link/file）**。`package.json` 依赖 `@local/dsh-plugin-sync: github:coollcat/dsh-plugin-sync`，且列在 `dsh.profile.bundles`；本地工作副本即本仓库根目录，与 remote 对应。
+- **构建 / 验证命令**：package.json scripts：`npm run verify`（check + test + check:public）、`npm test`（`node --test test/*.test.js`）、`npm run check`、`npm run check:public`。
+- **Git**：remote `origin` = https://github.com/coollcat/dsh-plugin-sync.git；当前状态 = 既有仓库，有未提交改动（含本 README），未新增提交。

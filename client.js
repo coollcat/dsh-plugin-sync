@@ -48,7 +48,7 @@ window.__ModuleLoader__.load({
       importFailed: 'That file is not an export from this page.',
       configTitle: 'Config fields',
       memoryTitle: 'Memory (Lingshu)', memoryLayers: 'Memory layers', memoryHint: 'Only the layers you tick are copied. Writes still go through Lingshu\'s own review gate: a refused node is reported as needing local review, never forced.',
-      memoryUnavailable: 'No Lingshu store or Python bridge found on this device', memoryEmpty: 'Nothing eligible in these layers',
+      memoryUnavailable: 'No Lingshu store or Python bridge found on this device', memoryLoading: 'Reading the memory catalogue…', memoryEmpty: 'Nothing eligible in these layers',
       memoryWrite: 'Write memory', memoryWriteUnsupported: 'This layer needs local review before it can be written',
       memoryTierHint: 'Knowledge and structural nodes need a Lingshu review channel; without one the write is refused locally and shown as needing review.',
       memoryLayerContextual: 'Contextual', memoryLayerGoals: 'Goals', memoryLayerUnresolved: 'Unresolved',
@@ -76,7 +76,8 @@ window.__ModuleLoader__.load({
       interval: 'Check every', minutes: 'min', hours: 'hour', days: 'day',
       allowed: 'Changes allowed to sync', install: 'Install new plugins', upgrade: 'Upgrade plugins',
       enable: 'Enable plugins', disable: 'Disable plugins', configSet: 'Write plugin config',
-      rules: 'Rules', excludeLabel: 'Never sync these (one per line, * allowed)', localOnlyLabel: 'Keep only on this device (one per line)',
+      rules: 'Rules', excludeLabel: 'Never sync these', localOnlyLabel: 'Keep only on this device',
+      noRules: 'No rules', addRule: 'Add', remove: 'Remove', rulePlaceholder: 'Plugin name or * pattern',
       noProtected: 'Protected system plugins are never synced.',
       heroTitle: 'Device sync',
       heroHint: 'First choose how this device connects, then decide what moves between devices. Changes save as you go.',
@@ -113,6 +114,9 @@ window.__ModuleLoader__.load({
       'pick-file-failed': 'Could not read the selected path. Type the absolute key path instead.',
       'request-failed': 'The sync service rejected the request.',
       pickFile: 'Browse', askAgentHint: 'Opens a new chat with your installed plugin list.',
+      importAdvice: 'Import JSON', importAdviceHint: 'Paste the JSON array returned by the agent.',
+      doImport: 'Import suggestions', suggestImportFailed: 'Paste a JSON array of {key, action, reason} objects.',
+      importedN: 'Imported {n} suggestions.', adoptSuggestions: 'Adopt all', fromImport: 'Imported',
       copyLink: 'Copy link', copied: 'Link copied.', 'copy-failed': 'Could not copy the link.',
       hostAddress: 'Address other devices use to reach me',
       resetSync: 'Reset sync', resetConfirm: 'Confirm reset', cancel: 'Cancel',
@@ -163,7 +167,7 @@ window.__ModuleLoader__.load({
       importFailed: '这个文件不是本页导出的格式。',
       configTitle: '配置项',
       memoryTitle: '记忆（灵枢）', memoryLayers: '记忆层', memoryHint: '只同步勾选的层。写入仍走灵枢自己的复核闸：被拒的节点标为「需本机复核」，不会绕过。',
-      memoryUnavailable: '本机没找到灵枢记忆库或 Python 桥', memoryEmpty: '这些层里没有可同步的节点',
+      memoryUnavailable: '本机没找到灵枢记忆库或 Python 桥', memoryLoading: '正在读取记忆目录…', memoryEmpty: '这些层里没有可同步的节点',
       memoryWrite: '写入记忆', memoryWriteUnsupported: '该层需要本机复核后才能写入',
       memoryTierHint: '知识层与结构层的写入需要灵枢的复核通道；没有通道时会被本机拒绝，计划里会标成「需本机复核」。',
       memoryLayerContextual: '情景', memoryLayerGoals: '目标', memoryLayerUnresolved: '未解',
@@ -191,7 +195,8 @@ window.__ModuleLoader__.load({
       interval: '多久检查一次', minutes: '分钟', hours: '小时', days: '天',
       allowed: '允许同步的改动', install: '安装新插件', upgrade: '升级插件',
       enable: '启用插件', disable: '停用插件', configSet: '写入插件配置',
-      rules: '规则', excludeLabel: '不同步这些（每行一条，可用 * 通配）', localOnlyLabel: '只留在这台设备（每行一条）',
+      rules: '规则', excludeLabel: '不同步这些', localOnlyLabel: '只留在这台设备',
+      noRules: '暂无规则', addRule: '添加', remove: '移除', rulePlaceholder: '插件名或 * 通配，回车添加',
       noProtected: '系统插件始终不同步。',
       heroTitle: '设备同步',
       heroHint: '先决定这台设备怎么连，再决定同步什么。改动点选即保存。',
@@ -228,6 +233,9 @@ window.__ModuleLoader__.load({
       'pick-file-failed': '读取所选路径失败，请直接填写私钥绝对路径。',
       'request-failed': '同步服务拒绝了这次请求。',
       pickFile: '选择文件', askAgentHint: '开一个新对话，带上本机插件清单让 AI 给建议。',
+      importAdvice: '导入 JSON', importAdviceHint: '粘贴 agent 返回的 JSON 建议数组。',
+      doImport: '导入建议', suggestImportFailed: '请粘贴 {key, action, reason} 对象组成的 JSON 数组。',
+      importedN: '已导入 {n} 条建议。', adoptSuggestions: '全部采纳', fromImport: '导入',
       copyLink: '复制链接', copied: '链接已复制。', 'copy-failed': '复制失败。',
       hostAddress: '其他设备访问本机的地址',
       resetSync: '重置同步', resetConfirm: '确认重置', cancel: '取消',
@@ -235,6 +243,10 @@ window.__ModuleLoader__.load({
       resetHint: '重置会清除配对并回到未配对状态，已勾选的同步范围会保留。',
     }
     const css = `
+.ps-chips{display:flex;flex-wrap:wrap;gap:6px;align-items:center;min-height:32px}
+.ps-chip{display:inline-flex;align-items:center;gap:4px;border:1px solid var(--dsw-alias-border-l2,#e0e3e9);border-radius:999px;padding:3px 9px;font-size:12px;background:var(--dsw-alias-interactive-bg-hover,#f2f4f8);max-width:100%;overflow-wrap:anywhere}
+.ps-chip-x{border:0;background:transparent;cursor:pointer;color:var(--dsw-alias-label-tertiary,#8b9097);font-size:14px;line-height:1;padding:0 2px}
+.ps-chip-x:hover{color:var(--dsw-alias-label-primary,#16181d)}
 .ps-wrap{display:flex;flex-direction:column;gap:12px;padding:4px 0 24px;color:var(--dsw-alias-label-primary,#16181d);min-width:0}
 .ps-card{border:1px solid var(--dsw-alias-settings-card-stroke,var(--dsw-alias-border-l1,#e6e8ee));border-radius:var(--dsw-radius-lg,12px);padding:14px 16px;background:var(--dsw-alias-settings-card-fill,var(--dsw-alias-card-fill,#fff));min-width:0;overflow-wrap:anywhere}
 .ps-hd{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0 0 10px}
@@ -694,6 +706,9 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const missing = (inventory?.plugins ?? []).filter((item) => !include.includes(item.key))
       const suggestions = Array.isArray(state.suggestions) ? state.suggestions : []
       const [open, setOpen] = useState(false)
+      const [importOpen, setImportOpen] = useState(false)
+      const [importText, setImportText] = useState('')
+      const [importedCount, setImportedCount] = useState(0)
       const addAll = () => draftCtl.update({ selected: [...new Set([...(draftCtl.draft?.selected ?? []), ...missing.map((item) => item.key)])] }, true)
       const ask = () => {
         const plugins = (inventory?.plugins ?? []).map((item) => `- ${item.key} (${item.enabled ? 'enabled' : 'disabled'})`).join('\n')
@@ -706,11 +721,21 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         ].join('\n')
         startAdviceChat(prompt)
       }
+      const doImport = () => ctl.run('suggestImport', async () => {
+        const value = await call('importSuggestions', { text: importText })
+        if (!Array.isArray(value?.imported) || value.imported.length === 0) throw { code: 'suggestImportFailed' }
+        setImportedCount(value.imported.length)
+        setImportText('')
+        setImportOpen(false)
+        return value
+      })
       const adopt = (ids) => ctl.run('advice', async () => { await call('adopt', { ids }) }, { success: 'saved' })
+      const adoptAll = () => adopt(suggestions.map((item) => item.id))
       const syncCount = suggestions.filter((item) => item.action === 'sync').length
       const localCount = suggestions.filter((item) => item.action === 'localOnly').length
       const actions = []
       if (suggestions.length) actions.push(h(Button, { key: 'toggle', quiet: true, onClick: () => setOpen((value) => !value) }, t(open ? 'hideList' : 'showList')))
+      actions.push(h(Button, { key: 'import', quiet: true, onClick: () => setImportOpen((value) => !value) }, t('importAdvice')))
       actions.push(h(Button, { key: 'ask', onClick: ask }, t('askAgent')))
       return h(Card, { title: t('advice'), hint: t('adviceHint'), actions },
         h('div', { className: 'ps-split' },
@@ -719,18 +744,28 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             : h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, t('allIncluded'))),
           missing.length > 0 && h(Button, { onClick: addAll, disabled: Boolean(ctl.busy) }, t('adoptAll'))),
         note(t('askAgentHint')),
+        importedCount > 0 && h('p', { className: 'ps-note' }, fmt(t('importedN'), { n: importedCount })),
+        importOpen && h('div', { style: { marginTop: 8 } },
+          h('textarea', { className: 'ps-input', rows: 4, value: importText, placeholder: t('importAdviceHint'), disabled: Boolean(ctl.busy), onChange: (event) => setImportText(event.target.value) }),
+          h('div', { className: 'ps-row', style: { marginTop: 8 } },
+            h(Button, { primary: true, disabled: Boolean(ctl.busy) || !importText.trim(), onClick: doImport }, t('doImport')),
+            h(Button, { quiet: true, onClick: () => setImportOpen(false) }, t('cancel')))),
         suggestions.length > 0 && h('div', { className: 'ps-split' },
           h('span', { className: 'txt' }, fmt(t('adviceScope'), { sync: syncCount, local: localCount })),
           h(Button, { quiet: true, onClick: () => setOpen((value) => !value) }, t(open ? 'hideList' : 'showList'))),
+        suggestions.length > 0 && h('div', { className: 'ps-row', style: { marginTop: 8 } },
+          h(Button, { quiet: true, disabled: Boolean(ctl.busy), onClick: adoptAll }, t('adoptSuggestions'))),
         open && suggestions.length > 0 && h('ul', { className: 'ps-list', style: { marginTop: 8 } },
           suggestions.map((item) => h('li', { key: item.id },
             h('span', { className: 'name' }, item.key),
             h(Badge, { tone: item.action === 'sync' ? 'ok' : item.action === 'localOnly' ? 'warn' : '' },
               t(item.action === 'sync' ? 'adopt' : item.action === 'localOnly' ? 'keepLocal' : 'dismiss')),
+            item.source === 'import' && h(Badge, {}, t('fromImport')),
             h('span', { style: { width: '100%', fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary)' } }, item.reason),
             h(Button, { quiet: true, onClick: () => adopt([item.id]), disabled: Boolean(ctl.busy) },
               t(item.action === 'localOnly' ? 'keepLocal' : 'adopt'))))),
-        h(Feedback, { area: 'advice', ctl, t }))
+        h(Feedback, { area: 'advice', ctl, t }),
+        h(Feedback, { area: 'suggestImport', ctl, t }))
     }
 
     function layerLabel(t, layer) {
@@ -741,7 +776,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
     // Memory scope lives here because it is a resource selection, not a plugin
     // property. Only layers Lingshu itself lets a reviewer-less writer touch are
     // offered; the write gate still decides each node at apply time.
-    function MemoryScope({ t, inventory, draft, update, disabled }) {
+    function MemoryScope({ t, ctl, inventory, draft, update, disabled }) {
+      const loading = !ctl.inventory
       const memory = inventory?.lingshu
       const layers = memory?.layers ?? []
       const chosen = new Set(draft.memoryLayers ?? [])
@@ -753,7 +789,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       return h('div', { style: { marginTop: 14, paddingTop: 12, borderTop: '1px solid var(--dsw-alias-border-l1,#eef0f4)' } },
         h('div', { className: 'ps-sub' }, t('memoryTitle')),
         h('p', { className: 'ps-note' }, t('memoryHint')),
-        !memory || !memory.available ? note(t('memoryUnavailable')) : null,
+        loading ? note(t('memoryLoading')) : !memory || !memory.available ? note(t('memoryUnavailable')) : null,
         memory?.available && offered.length === 0 ? note(t('memoryEmpty')) : null,
         memory?.available && offered.length > 0 && h('div', { className: 'ps-row' },
           offered.map((item) => h('label', { key: item.layer, className: 'ps-check' },
@@ -764,6 +800,30 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             `${layerLabel(t, item.layer)} (${item.eligible ?? 0})`))),
         memory?.available && !memory.writable ? note(t('memoryUnavailable'), 'warn') : null,
         memory?.available && memory.writable ? note(t('memoryTierHint')) : null)
+    }
+
+    function RuleList({ t, label, values, onAdd, onRemove, disabled, options }) {
+      const [draft, setDraft] = useState('')
+      const add = () => {
+        const value = draft.trim()
+        if (!value) return
+        onAdd(value)
+        setDraft('')
+      }
+      const chips = values.length
+        ? values.map((value) => h('span', { key: value, className: 'ps-chip' }, value,
+          h('button', { type: 'button', className: 'ps-chip-x', disabled, title: t('remove'), onClick: () => onRemove(value) }, '×')))
+        : h('span', { className: 'hint' }, t('noRules'))
+      const opts = options.map((key) => h('option', { key, value: key }))
+      return h('div', { className: 'ps-field', style: { flex: '1 1 220px' } },
+        h('span', {}, label),
+        h('div', { className: 'ps-chips' }, chips),
+        h('div', { className: 'ps-row', style: { marginTop: 6 } },
+          h('input', { className: 'ps-input', style: { flex: 1 }, value: draft, disabled, list: 'ps-rule-plugins', placeholder: t('rulePlaceholder'),
+            onChange: (event) => setDraft(event.target.value),
+            onKeyDown: (event) => { if (event.key === 'Enter') { event.preventDefault(); add() } } }),
+          h(Button, { quiet: true, disabled: disabled || !draft.trim(), onClick: add }, t('addRule'))),
+        h('datalist', { id: 'ps-rule-plugins' }, opts))
     }
 
     function Scope({ ctl, t, draftCtl }) {
@@ -871,15 +931,17 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           note(t('noProtected')),
           h('div', { className: 'ps-sub', style: { marginTop: 10 } }, t('rules')),
           h('div', { className: 'ps-row', style: { alignItems: 'flex-start' } },
-            h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('excludeLabel')),
-              h('textarea', { className: 'ps-input', rows: 3, value: draft.exclude, disabled, onChange: (event) => update({ exclude: event.target.value }) })),
-            h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('localOnlyLabel')),
-              h('textarea', { className: 'ps-input', rows: 3, value: draft.localOnly, disabled, onChange: (event) => update({ localOnly: event.target.value }) })))),
-        h(MemoryScope, { t, inventory, draft, update, disabled }),
+            h(RuleList, { t, label: t('excludeLabel'), values: lines(draft.exclude), options: all.map((item) => item.key), disabled,
+              onAdd: (value) => update({ exclude: [...new Set([...lines(draft.exclude), value])].join('\n') }, true),
+              onRemove: (value) => update({ exclude: lines(draft.exclude).filter((item) => item !== value).join('\n') }, true) }),
+            h(RuleList, { t, label: t('localOnlyLabel'), values: lines(draft.localOnly), options: all.map((item) => item.key), disabled,
+              onAdd: (value) => update({ localOnly: [...new Set([...lines(draft.localOnly), value])].join('\n') }, true),
+              onRemove: (value) => update({ localOnly: lines(draft.localOnly).filter((item) => item !== value).join('\n') }, true) }))),
         all.length > 0 && selected.length === 0 && note(t('noneWarn'), 'warn'),
         h('div', { className: 'ps-row', style: { marginTop: 12 } },
           h(Button, { quiet: true, onClick: importJson, disabled }, t('importJson')),
           h(Button, { quiet: true, onClick: exportJson, disabled: !selected.length }, t('exportJson'))),
+        h(MemoryScope, { t, ctl, inventory, draft, update, disabled }),
         error && note(statusText(t, error), 'warn'),
         h(Feedback, { area: 'scope', ctl, t }))
     }
