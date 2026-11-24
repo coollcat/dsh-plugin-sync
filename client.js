@@ -32,6 +32,8 @@ window.__ModuleLoader__.load({
       joinUrl: 'Address', joinKind: 'The other device is a', ssh: 'Use an SSH tunnel (optional)',
       sshHost: 'SSH host', sshUser: 'User', sshIdentity: 'Private key file', sshPort: 'SSH port',
       sshHint: 'Uses the system OpenSSH client with the private key path below. The host key is verified on first connection and remembered; the plugin never stores your key.',
+      sshHostRequired: 'Fill in the SSH host yourself. The link does not contain it, and nothing invented is ever used.',
+      sshHostInvalid: 'That host cannot be used in an SSH link. Letters, digits, dot, colon and hyphen only; no spaces, brackets or slashes.',
       secureHint: 'Use HTTPS on public networks, plain HTTP only on a trusted LAN, or an SSH tunnel. Anyone with the invitation link can use it.',
       advice: 'Suggestions', adviceHint: 'Based on this device, applied in one click',
       notIncluded: 'plugins are not in the sync scope', adoptAll: 'Add all', allIncluded: 'All included',
@@ -114,6 +116,10 @@ window.__ModuleLoader__.load({
       'pick-file-failed': 'Could not read the selected path. Type the absolute key path instead.',
       'request-failed': 'The sync service rejected the request.',
       pickFile: 'Browse', askAgentHint: 'Opens a new chat with your installed plugin list.',
+      chatUnavailable: 'This surface cannot open a chat. Open a conversation, ask for the JSON there, then paste it below.',
+      adviceStep1: 'Click "Ask the agent" — a new chat opens with this device\'s plugin list.',
+      adviceStep2: 'The agent answers with a JSON array of {key, action, reason}.',
+      adviceStep3: 'Paste that JSON here and import; each suggestion still needs your adopt.',
       importAdvice: 'Import JSON', importAdviceHint: 'Paste the JSON array returned by the agent.',
       doImport: 'Import suggestions', suggestImportFailed: 'Paste a JSON array of {key, action, reason} objects.',
       importedN: 'Imported {n} suggestions.', adoptSuggestions: 'Adopt all', fromImport: 'Imported',
@@ -151,6 +157,8 @@ window.__ModuleLoader__.load({
       joinUrl: '对方地址', joinKind: '对方是', ssh: '走 SSH 隧道（可选）',
       sshHost: 'SSH 主机', sshUser: '用户', sshIdentity: '私钥文件', sshPort: 'SSH 端口',
       sshHint: '用下面填写的私钥路径调用系统 OpenSSH；首次连接自动记录主机指纹，之后指纹变化会拒绝。插件不保存你的私钥。',
+      sshHostRequired: '请自己填写 SSH 主机。链接里不带主机，也不会用任何编造的地址代替。',
+      sshHostInvalid: '这个主机名不能写进 SSH 链接：只允许字母、数字、点、冒号和连字符，不能有空格、方括号或斜杠。',
       secureHint: '公网用 HTTPS，可信局域网才用明文 HTTP，或用 SSH 隧道。拿到邀请链接的人就能连，请私下发送。',
       advice: '建议', adviceHint: '按这台设备的现状给出，点一下就应用',
       notIncluded: '个插件还没纳入同步', adoptAll: '全部纳入', allIncluded: '都已纳入',
@@ -233,6 +241,10 @@ window.__ModuleLoader__.load({
       'pick-file-failed': '读取所选路径失败，请直接填写私钥绝对路径。',
       'request-failed': '同步服务拒绝了这次请求。',
       pickFile: '选择文件', askAgentHint: '开一个新对话，带上本机插件清单让 AI 给建议。',
+      chatUnavailable: '这里打不开对话。请到对话里要 JSON，再粘贴到下面导入。',
+      adviceStep1: '点「让 agent 给建议」，进入新对话（已带上本机插件清单）。',
+      adviceStep2: '对话完成后，agent 给出 {key, action, reason} 的 JSON 数组。',
+      adviceStep3: '把 JSON 粘到下面导入；每条建议仍需你逐条采纳。',
       importAdvice: '导入 JSON', importAdviceHint: '粘贴 agent 返回的 JSON 建议数组。',
       doImport: '导入建议', suggestImportFailed: '请粘贴 {key, action, reason} 对象组成的 JSON 数组。',
       importedN: '已导入 {n} 条建议。', adoptSuggestions: '全部采纳', fromImport: '导入',
@@ -344,6 +356,11 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
 @media (max-width:880px){.ps-grid{grid-template-columns:minmax(0,1fr)}}
 @media (max-width:640px){.ps-card{padding:12px}.ps-hd .hint{display:none}.ps-guide{padding:12px}.ps-guide-opt{padding:8px}}
 `
+    // Lingshu/memory settings are device state. The row never offers them as a
+    // "sync settings" item and the host refuses them even if a policy names the
+    // entry, so hiding the switch cannot strand a misleading toggle.
+    const LOCAL_SETTINGS = [/(?:^|[-@/])(?:dsh-)?memory(?:$|[-@/])/i, /lingshu/i]
+    const isLocalSettings = (key) => typeof key === 'string' && LOCAL_SETTINGS.some((pattern) => pattern.test(key))
     let startAdviceChat = () => {}
     const caps = ['install', 'upgrade', 'enable', 'disable', 'configSet', 'memoryWrite']
     const listFields = ['exclude', 'localOnly']
@@ -369,9 +386,16 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           const parsed = new URL(base)
           const remotePort = Number(query.remote) >= 1 && Number(query.remote) <= 65535 ? query.remote : '3081'
           const port = Number(query.port) >= 1 && Number(query.port) <= 65535 ? query.port : '22'
+          // Only carry what the link actually states. A link minted without a
+          // host (ssh:///...) leaves the host blank on purpose: the joiner types
+          // its own address instead of trusting a placeholder like "host".
+          const stated = (value) => typeof value === 'string' && value && value.toLowerCase() !== 'host' ? value : ''
+          const decoded = (value) => { try { return decodeURIComponent(value) } catch { return value } }
+          const host = stated(query.host) || stated(parsed.hostname)
+          const user = stated(query.user) || stated(decoded(parsed.username))
           return {
             url: `http://127.0.0.1:${remotePort}`, token,
-            ssh: true, host: parsed.hostname, user: parsed.username || '', port, remotePort,
+            ssh: true, host, user, port, remotePort, hostMissing: !host,
           }
         }
         if (!/^https?:\/\//i.test(base)) return null
@@ -700,15 +724,19 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           h('span', { style: { fontSize: 11.5, color: 'var(--dsw-alias-label-tertiary,#8b9097)' } }, t('guideSkipHint'))))
     }
 
+    // Agent recommendations are a conversation, not an in-process call: the
+    // click opens a chat (workspace.startSession), the agent answers with a JSON
+    // array, and this card is where that JSON comes back. All three steps stay on
+    // screen so the round trip is visible instead of implied.
     function Advice({ ctl, t, draftCtl }) {
       const { state, inventory } = ctl
       const include = state.policy.include ?? []
       const missing = (inventory?.plugins ?? []).filter((item) => !include.includes(item.key))
       const suggestions = Array.isArray(state.suggestions) ? state.suggestions : []
       const [open, setOpen] = useState(false)
-      const [importOpen, setImportOpen] = useState(false)
       const [importText, setImportText] = useState('')
       const [importedCount, setImportedCount] = useState(0)
+      const [chatError, setChatError] = useState(null)
       const addAll = () => draftCtl.update({ selected: [...new Set([...(draftCtl.draft?.selected ?? []), ...missing.map((item) => item.key)])] }, true)
       const ask = () => {
         const plugins = (inventory?.plugins ?? []).map((item) => `- ${item.key} (${item.enabled ? 'enabled' : 'disabled'})`).join('\n')
@@ -719,14 +747,13 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           'Installed plugins:',
           plugins || '(none)',
         ].join('\n')
-        startAdviceChat(prompt)
+        setChatError(startAdviceChat(prompt) ? null : t('chatUnavailable'))
       }
       const doImport = () => ctl.run('suggestImport', async () => {
         const value = await call('importSuggestions', { text: importText })
         if (!Array.isArray(value?.imported) || value.imported.length === 0) throw { code: 'suggestImportFailed' }
         setImportedCount(value.imported.length)
         setImportText('')
-        setImportOpen(false)
         return value
       })
       const adopt = (ids) => ctl.run('advice', async () => { await call('adopt', { ids }) }, { success: 'saved' })
@@ -735,21 +762,24 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const localCount = suggestions.filter((item) => item.action === 'localOnly').length
       const actions = []
       if (suggestions.length) actions.push(h(Button, { key: 'toggle', quiet: true, onClick: () => setOpen((value) => !value) }, t(open ? 'hideList' : 'showList')))
-      actions.push(h(Button, { key: 'import', quiet: true, onClick: () => setImportOpen((value) => !value) }, t('importAdvice')))
-      actions.push(h(Button, { key: 'ask', onClick: ask }, t('askAgent')))
+      actions.push(h(Button, { key: 'ask', primary: true, onClick: ask }, t('askAgent')))
       return h(Card, { title: t('advice'), hint: t('adviceHint'), actions },
         h('div', { className: 'ps-split' },
           h('span', { className: 'txt' }, missing.length
             ? h('span', {}, h('b', {}, String(missing.length)), ' ', t('notIncluded'))
             : h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } }, t('allIncluded'))),
           missing.length > 0 && h(Button, { onClick: addAll, disabled: Boolean(ctl.busy) }, t('adoptAll'))),
-        note(t('askAgentHint')),
-        importedCount > 0 && h('p', { className: 'ps-note' }, fmt(t('importedN'), { n: importedCount })),
-        importOpen && h('div', { style: { marginTop: 8 } },
+        h('ol', { className: 'ps-note', style: { margin: '8px 0 0', paddingLeft: 18 } },
+          h('li', {}, t('adviceStep1')),
+          h('li', {}, t('adviceStep2')),
+          h('li', {}, t('adviceStep3'))),
+        chatError && note(chatError, 'warn'),
+        h('div', { style: { marginTop: 10 } },
+          h('div', { className: 'ps-sub' }, t('importAdvice')),
           h('textarea', { className: 'ps-input', rows: 4, value: importText, placeholder: t('importAdviceHint'), disabled: Boolean(ctl.busy), onChange: (event) => setImportText(event.target.value) }),
           h('div', { className: 'ps-row', style: { marginTop: 8 } },
-            h(Button, { primary: true, disabled: Boolean(ctl.busy) || !importText.trim(), onClick: doImport }, t('doImport')),
-            h(Button, { quiet: true, onClick: () => setImportOpen(false) }, t('cancel')))),
+            h(Button, { primary: true, disabled: Boolean(ctl.busy) || !importText.trim(), onClick: doImport }, t('doImport')))),
+        importedCount > 0 && h('p', { className: 'ps-note' }, fmt(t('importedN'), { n: importedCount })),
         suggestions.length > 0 && h('div', { className: 'ps-split' },
           h('span', { className: 'txt' }, fmt(t('adviceScope'), { sync: syncCount, local: localCount })),
           h(Button, { quiet: true, onClick: () => setOpen((value) => !value) }, t(open ? 'hideList' : 'showList'))),
@@ -881,7 +911,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       // Only configs with multiple non-secret fields offer "同步设置". A single
       // field is a tweak, not a switchable settings surface (matches engine gate).
       const configsFor = (pluginKey) => (inventory?.configs ?? []).filter((entry) =>
-        entry.eligible && (entry.bundle === pluginKey || entry.key === pluginKey))
+        entry.eligible && !isLocalSettings(entry.bundle) && !isLocalSettings(entry.key)
+        && (entry.bundle === pluginKey || entry.key === pluginKey))
       const settingsOn = (pluginKey) => configsFor(pluginKey).some((entry) =>
         (draft.configFields?.[entry.entryId] ?? []).length > 0 && (draft.configIncluded ?? []).includes(entry.entryId))
       const toggleSettings = (pluginKey, on) => {
@@ -1058,6 +1089,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const peerLimit = role === 'peer' && (Boolean(state.center) || peers.some((peer) => peer.status === 'connected'))
       const disabled = Boolean(ctl.busy)
       const sshArgs = () => form.ssh ? { kind: 'ssh', host: form.host.trim(), user: form.user.trim(), identityFile: form.identityFile.trim(), port: Number(form.port) || 22, remotePort: Number(form.remotePort) || syncPort } : undefined
+      // An SSH link carries no address of its own; the joiner must state it.
+      const sshHostReady = !form.ssh || Boolean(form.host.trim())
       const createInvite = () => ctl.run('connection', async () => {
         const value = await call('invite')
         if (typeof value?.token !== 'string' || !value.token) throw { code: 'bad-response' }
@@ -1069,7 +1102,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const useLink = () => ctl.run('link', async () => {
         const parsed = parseInviteLink(link)
         if (!parsed) throw { code: 'invalid-invitation' }
-        patch({ link, verified: false, form: { ...form, ...parsed } })
+        const { hostMissing, ...fields } = parsed
+        patch({ link, verified: false, hostMissing: Boolean(hostMissing), mode: parsed.ssh ? 'ssh' : 'lan', form: { ...form, ...fields } })
       }, { reload: false, success: 'linkParsed' })
       const verify = () => ctl.run('verify', async () => {
         const value = await call('verify', { url: form.url.trim(), token: form.token.trim(), ssh: sshArgs() })
@@ -1089,8 +1123,19 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         if (!invite?.token) return ''
         const token = encodeURIComponent(invite.token)
         if (mode === 'ssh') {
-          const user = form.user.trim() ? `${form.user.trim()}@` : ''
-          return `ssh://${user}${form.host.trim() || 'host'}/plugin-sync/join?invite=${token}&remote=${form.remotePort || syncPort}&port=${form.port || '22'}`
+          const user = form.user.trim()
+          const host = form.host.trim()
+          const remotePort = Number(form.remotePort) >= 1 && Number(form.remotePort) <= 65535 ? Number(form.remotePort) : syncPort
+          const sshPort = Number(form.port) >= 1 && Number(form.port) <= 65535 ? Number(form.port) : 22
+          const query = `invite=${token}&remote=${remotePort}&port=${sshPort}`
+          // Never mint a placeholder host: an unknown host becomes an empty
+          // authority (ssh:///...) plus explicit user/host params, so the joiner
+          // fills its own address and nothing invented ever reaches ssh -W.
+          if (!host) return `ssh:///plugin-sync/join?${query}${user ? `&user=${encodeURIComponent(user)}` : ''}`
+          // Same shape the transport accepts; a host it would reject must not
+          // reach a link that silently fails on the other side.
+          if (!/^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/.test(host)) return ''
+          return `ssh://${user ? `${encodeURIComponent(user)}@` : ''}${host}/plugin-sync/join?${query}`
         }
         const raw = (connection.host || originHint() || `http://127.0.0.1:${syncPort}`).replace(/\/$/, '')
         const withScheme = /^https?:\/\//i.test(raw) ? raw : `${mode === 'public' ? 'https://' : 'http://'}${raw}`
@@ -1151,11 +1196,12 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
                 h('div', { className: 'ps-row' },
                   h('input', { className: 'ps-input', style: { flex: 1 }, value: form.identityFile, disabled: !form.ssh, onChange: (event) => setForm({ ...form, identityFile: event.target.value }) }),
                   h(Button, { quiet: true, disabled: disabled || !form.ssh, onClick: pickFile }, t('pickFile'))))),
+            form.ssh && !form.host.trim() && note(t('sshHostRequired'), 'warn'),
             note(t('sshHint'))),
           h('div', { className: 'ps-row', style: { marginTop: 10 } },
-            h(Button, { disabled: disabled || !form.url.trim() || !form.token.trim(), onClick: verify }, t('verifyLink')),
+            h(Button, { disabled: disabled || !form.url.trim() || !form.token.trim() || !sshHostReady, onClick: verify }, t('verifyLink')),
             verified && h(Badge, { tone: 'ok' }, t('verified')),
-            h(Button, { primary: true, disabled: disabled || !verified || !form.url.trim() || !form.token.trim(), onClick: join }, t('joinCenter'))),
+            h(Button, { primary: true, disabled: disabled || !verified || !form.url.trim() || !form.token.trim() || !sshHostReady, onClick: join }, t('joinCenter'))),
           h(Feedback, { area: 'link', ctl, t }),
           h(Feedback, { area: 'pickFile', ctl, t }),
           h(Feedback, { area: 'verify', ctl, t })),
@@ -1179,6 +1225,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
                 h('input', { className: 'ps-input', value: connection.host || originHint(), placeholder: `http://192.0.2.10:${syncPort}`, onChange: (event) => patch({ host: event.target.value }) })),
               h('label', { className: 'ps-field', style: { marginTop: 8 } }, h('span', {}, t('inviteLink')),
                 h('code', { className: 'ps-mono ps-code' }, inviteLink())),
+              mode === 'ssh' && !inviteLink() && note(t('sshHostInvalid'), 'warn'),
               h('div', { className: 'ps-row', style: { marginTop: 8 } },
                 h(Button, { quiet: true, disabled, onClick: copyLink }, t('copyLink'))),
               note(`${t('inviteExpires')} ${invite.expiresAt ?? '—'}`)),

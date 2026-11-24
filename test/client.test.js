@@ -498,3 +498,45 @@ hookTest('rules are added as GUI chips instead of raw textareas', async (t) => {
   assert.ok(ui.all().includes('gamma*'))
   assert.equal(ui.all().includes('one per line'), false)
 })
+
+hookTest('device-bound memory settings never render a sync-settings switch', async (t) => {
+  const start = state('center', { policy: policy({ include: ['alpha'] }) })
+  const inventory = {
+    plugins: [{ key: 'alpha', enabled: true }, { key: '@furongjun1999/dsh-memory', enabled: true }],
+    configs: [
+      { key: 'alpha-config', entryId: 'alpha-config', bundle: 'alpha', fields: [['theme'], ['density']], eligible: true },
+      { key: 'mem-config', entryId: 'mem-config', bundle: '@furongjun1999/dsh-memory', fields: [['root'], ['python']], eligible: true },
+    ],
+  }
+  const ui = await mount(t, start, (body) => {
+    if (body.action === 'state') return success(start)
+    if (body.action === 'inventory') return success(inventory)
+    return success({ status: 'ok' })
+  })
+  assert.ok(ui.all().includes('@furongjun1999/dsh-memory'))
+  // Only the ordinary plugin row offers the switch; the memory row does not.
+  assert.equal(ui.all().split('Sync settings').length - 1, 1, ui.all())
+})
+
+hookTest('agent advice is a visible three-step round trip with an always-on import box', async (t) => {
+  const start = state('center', { policy: policy({ include: [] }) })
+  const calls = []
+  const ui = await mount(t, start, answer(start), {
+    extra: { uiWorkspace: { startSession: (id, options) => { calls.push(options); return {} } } },
+  })
+  // The three steps and the paste box are on screen before any click.
+  assert.ok(ui.all().includes('The agent answers with a JSON array'), ui.all())
+  assert.ok(ui.all().includes('Paste that JSON here and import'), ui.all())
+  await ui.fillTextarea('Paste the JSON array returned by the agent.', '')
+  await ui.click('Ask the agent for suggestions')
+  assert.equal(calls.length, 1)
+  assert.ok(calls[0].prompt.includes('Return a JSON array only'))
+  assert.ok(calls[0].prompt.includes('- alpha (enabled)'))
+})
+
+hookTest('a surface without a chat shows the fallback instead of failing silently', async (t) => {
+  const start = state('center', { policy: policy({ include: [] }) })
+  const ui = await mount(t, start, answer(start))
+  await ui.click('Ask the agent for suggestions')
+  assert.ok(ui.all().includes('This surface cannot open a chat'), ui.all())
+})

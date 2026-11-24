@@ -101,18 +101,21 @@ test('collection filters layers, sensitivity, secrets and symlinks', () => {
   assert.ok(catalogue.eligibleBytes > 0 && catalogue.eligibleBytes < MAX_TOTAL_BYTES)
 })
 
-test('policy requires explicit include and enforces layer/sensitivity caps', () => {
-  const record = { kind: 'lingshuNode', layer: 'contextual', sensitivity: 'internal', key: 'mem_a' }
+test('memory sync is scoped by layer, sensitivity and cap, not by include', () => {
+  const record = { kind: 'lingshuNode', layer: 'contextual', sensitivity: 'internal', key: 'mem_a', bundle: 'lingshu:contextual' }
   const base = defaultPolicy({ include: [], caps: { memoryWrite: true } })
-  assert.equal(evaluate(base, record, 'pull').reason, 'memory-not-explicitly-included')
-  const included = defaultPolicy({ include: ['lingshu:contextual'], caps: { memoryWrite: true } })
-  assert.equal(evaluate(included, { ...record, bundle: 'lingshu:contextual' }, 'pull').allowed, true)
+  // Memory is its own domain: the layer list is the opt-in, so an empty plugin
+  // whitelist no longer blocks it.
+  assert.equal(evaluate(base, record, 'pull').reason, 'memory-layer-in-scope')
+  // An exclusion always wins, even when the layer is also included.
+  const excluded = defaultPolicy({ include: ['lingshu:contextual'], exclude: ['lingshu:contextual'], caps: { memoryWrite: true } })
+  assert.equal(evaluate(excluded, record, 'pull').reason, 'excluded:lingshu:contextual')
   const wrongLayer = defaultPolicy({ include: ['lingshu:knowledge'], caps: { memoryWrite: true } })
-  assert.equal(evaluate(wrongLayer, { ...record, layer: 'knowledge', bundle: 'lingshu:knowledge' }, 'pull').reason, 'memory-layer-not-in-scope')
-  const privateNode = { ...record, sensitivity: 'private', bundle: 'lingshu:contextual' }
-  assert.equal(evaluate(included, privateNode, 'pull').reason, 'memory-sensitivity-above-policy')
-  const noCap = defaultPolicy({ include: ['lingshu:contextual'] })
-  assert.equal(evaluate(noCap, { ...record, bundle: 'lingshu:contextual', requiresCap: 'memoryWrite' }, 'pull').reason, 'cap-disabled:memoryWrite')
+  assert.equal(evaluate(wrongLayer, { ...record, layer: 'knowledge' }, 'pull').reason, 'memory-layer-not-in-scope')
+  const privateNode = { ...record, sensitivity: 'private' }
+  assert.equal(evaluate(base, privateNode, 'pull').reason, 'memory-sensitivity-above-policy')
+  const noCap = defaultPolicy({ caps: { memoryWrite: false } })
+  assert.equal(evaluate(noCap, { ...record, requiresCap: 'memoryWrite' }, 'pull').reason, 'cap-disabled:memoryWrite')
 })
 
 test('planner emits one high-risk memoryWrite and keeps both sides on a concurrent change', () => {

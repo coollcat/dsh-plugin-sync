@@ -2,6 +2,15 @@
 
 ## 未发布
 
+- 邀请链接不再编造主机：SSH 模式下主机留空时生成 `ssh:///plugin-sync/join?invite=…&remote=…&port=…[&user=…]`，接入端只回填链接里真正写出的 `host`/`user`（字面量 `host` 及大小写变体一律视为空），主机为空时「验证链接/连接」保持禁用并提示手填，私钥、主机、用户名不再被任何默认值填充。生成侧用与 `ssh -W` 同族的正则校验主机，非法主机不生成链接；`remotePort`/`port` 先夹紧为整数，堵住 `&user=` 之类的参数注入。
+- Windows 私钥路径乱码：`pickKeyFilePath()` 的 PowerShell 选择框现在强制 `[Console]::OutputEncoding`/`$OutputEncoding` 为 UTF-8；返回值出现 `U+FFFD` 直接判 `pick-file-failed`，不再把半解码路径交给 ssh。
+- 灵枢记忆改为独立同步域：`DEFAULT_CAPS.memoryWrite` 默认打开，`evaluate()` 对 `lingshuNode` 不再要求 `include` 出现 `lingshu:<layer>`（`policy.lingshu.layers` 即准入），仍叠加层白名单、密级上限、`cap` 与 `exclude`；`exclude` 对记忆无条件优先，不再被 include 压过。入站记忆写入复用灵枢 `data/policy.json` 的 `forbidden` 模式，新增错误码 `memory-write-denied`（原来该规则只在出站生效）。
+- 测试：记忆策略回归改为覆盖「层内允许 / 排除优先 / 层外拒绝 / 密级拒绝 / cap 拒绝」五项。全套 127 项通过。
+
+- 「同步设置」不再出现在设备绑定的记忆插件上：`@furongjun1999/dsh-memory`（及 lingshu 类 bundle）的配置是设备状态（记忆库路径、Python 桥、复核通道），清单不再标 `eligible`、客户端不再渲染勾选框、引擎 `evaluate` 直接以 `config-device-bound` 拒绝、计划里既不产生写入也不留假开关。清单、策略、计划三处同一判定（`settingsLocalOnly`）；IM 类插件仍可勾选，默认不勾。不加任何「不同步」说明文案。
+- 「建议」卡改成可见的三步闭环：① 点「让 agent 给建议」开新对话（预填插件清单）② 对话末尾给出 `[{key,action,reason}]` ③ 粘回卡片内始终显示的导入框点「导入建议」；打不开对话时卡片直接提示，不再静默失败。删除藏在按钮后的导入入口。
+- 新增回归：目录/策略/计划三处对设备绑定设置的拒绝，客户端不渲染该行勾选、三步流程与无对话回落；全套 127 项、`check` 通过。
+
 - 「建议」卡新增「导入 JSON」：把 agent 返回的 `[{key,action,reason}]` 数组粘贴进来，校验后转成建议（未安装、IM/记忆/灵枢等本机专属插件会被过滤），再由用户逐条或一键采纳；agent 永远不直接改策略。
 - 「规则」从多行文本框改成可视化标签：每条规则一个可删除 chip，输入框回车或点「添加」写入，支持插件名补全与 `*` 通配。记忆目录读取中显示「正在读取记忆目录」，不再闪现「没找到灵枢」；导入/导出按钮移到记忆块之前，避免误认为记忆控件。
 - 同步协议脱离 Web GUI 的 3080，改用独立监听端口（默认 3081，可配 `syncPort` / `syncHost`）。3080 只保留同源的浏览器 action；3081 只接受 `/hello`、`/state`、`/proposals`，且三条路由都必须带 token，未配对前拒绝任何状态或提案查询。SSH 转发的远端端口同步改为 3081。

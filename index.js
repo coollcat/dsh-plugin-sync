@@ -8,11 +8,11 @@ import os from 'node:os'
 import { spawn } from 'node:child_process'
 
 import { createEngine, PUBLIC_ERRORS } from './lib/engine.js'
-import { configRecord, projectConfig, mergeConfigFields, configHash, validFieldPath, isSecretKey, MIN_CONFIG_FIELDS } from './lib/config.js'
+import { configRecord, projectConfig, mergeConfigFields, configHash, validFieldPath, isSecretKey, MIN_CONFIG_FIELDS, settingsLocalOnly } from './lib/config.js'
 import { hash, validateIdentity, validateChangeset, validateLingshuRecord, resourceHash, LINGSHU_LAYERS } from './lib/protocol.js'
 import { bearerFrom } from './lib/transport.js'
 import { profileScope, createStore, createHostAudit, createCredentialAdapter, archiveDecisions, unwrap, HostError, jsonRequestGate, readBody, businessStatus } from './lib/host-runtime.js'
-import { collectLingshu, lingshuCatalogue, resolveMemoryRoot, resolveBridge, canonicalNode, writeLingshu } from './lib/lingshu.js'
+import { collectLingshu, lingshuCatalogue, resolveMemoryRoot, resolveBridge, canonicalNode, writeLingshu, loadForbiddenPatterns } from './lib/lingshu.js'
 // Merged in from the standalone `lingshu-mute` plugin (2026-11-21). Its apply()
 // installs the lingshu write gate, the /plugins/lingshu-mute HTTP surface and the
 // /mute command. All of it is effect-scoped to this plugin's ctx, so disposal on
@@ -161,6 +161,12 @@ export function createLingshuAdapter(ctx, config = {}, getPolicy = () => null) {
       try { contentHash = resourceHash(record) } catch { return { ok: false, reason: 'memory-write-failed' } }
       record.contentHash = contentHash
       if (validateLingshuRecord(record).length) return { ok: false, reason: 'memory-write-failed' }
+      // Inbound nodes obey the same forbid rules that keep them from being
+      // published; the gate used to run only on the way out.
+      try {
+        const forbidden = loadForbiddenPatterns(memory.root).patterns
+        if (forbidden.some(({ re }) => re.test(record.content))) return { ok: false, reason: 'memory-write-denied' }
+      } catch { /* Unreadable policy: the graph's own write gate still applies. */ }
       // The engine checked the baseline before dispatch; re-read inside the
       // adapter so a write that raced another writer cannot overwrite it.
       let currentHash = null
@@ -228,7 +234,10 @@ export async function resourceCatalogue(adapters) {
   const plugins = (await adapters.collectInventory()).map(({ key, enabled }) => ({ key, enabled }))
   const configs = (await adapters.collectConfig()).map(({ key, entryId, bundle, config }) => {
     const fields = paths(config)
-    return { key, entryId, bundle, fields, eligible: fields.length >= MIN_CONFIG_FIELDS }
+    // Memory/Lingshu settings are device state: they are not offered as a
+    // switchable settings surface, so the catalogue never marks them eligible.
+    const local = settingsLocalOnly(bundle) || settingsLocalOnly(key)
+    return { key, entryId, bundle, fields, eligible: !local && fields.length >= MIN_CONFIG_FIELDS }
   })
   let lingshu = null
   try { lingshu = adapters.lingshuCatalogue ? await adapters.lingshuCatalogue() : null } catch { lingshu = null }
@@ -298,6 +307,10 @@ export async function pickKeyFilePath() {
   let value
   if (process.platform === 'win32') {
     const script = [
+      // Windows PowerShell writes stdout in the console code page (CP936 on a
+      // Chinese system); reading it as UTF-8 turned non-ASCII paths into U+FFFD.
+      '[Console]::OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
+      '$OutputEncoding = [System.Text.UTF8Encoding]::new($false)',
       'Add-Type -AssemblyName System.Windows.Forms',
       '$d = New-Object System.Windows.Forms.OpenFileDialog',
       '$d.Title = "Select SSH private key"',
@@ -311,6 +324,9 @@ export async function pickKeyFilePath() {
     value = await runDialog('zenity', ['--file-selection', '--title=Select SSH private key'])
   }
   if (value === null) return null
+  // A lossy decode means the dialog path cannot be trusted; never hand ssh a
+  // half-decoded key path.
+  if (typeof value === 'string' && value.includes('\uFFFD')) throw new HostError('pick-file-failed')
   if (typeof value !== 'string' || !value || value.length > 4096 || /[\r\n\0]/.test(value) ||
       !(path.isAbsolute(value) || /^[~]/.test(value))) throw new HostError('pick-file-failed')
   return value
