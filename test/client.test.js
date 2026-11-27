@@ -30,7 +30,7 @@ function register(react, transport, language = 'en', storage = new Map(), extra 
     },
     fetch: transport, AbortController, setTimeout, clearTimeout,
     Blob: class { constructor(parts) { this.parts = parts } },
-    URL: { createObjectURL: () => 'blob:test', revokeObjectURL: () => {} },
+    URL: class extends URL { static createObjectURL() { return 'blob:test' } static revokeObjectURL() {} },
     FileReader: class {},
     document: { createElement: () => ({ click() {}, addEventListener() {}, set type(value) {}, set accept(value) {}, files: [] }) },
     console: new Proxy({}, { get() { return () => assert.fail('client wrote to console') } }),
@@ -216,6 +216,35 @@ hookTest('a failed load shows the mapped error, never the raw one, and retries i
   assert.ok(ui.all().includes('Sync scope'), ui.all())
 })
 
+hookTest('an unbound sync listener is reported with its port, and unknown codes stay visible', async (t) => {
+  const start = state('unpaired', { listener: { status: 'error', host: '127.0.0.1', port: 3081, error: 'port-in-use', attempts: 3 } })
+  const ui = await mount(t, start, answer(start))
+  const shown = ui.all()
+  assert.ok(shown.includes('The sync listener is not running'), shown)
+  assert.ok(shown.includes('127.0.0.1:3081'), shown)
+  assert.ok(shown.includes('Port 3081 is already taken'), shown)
+  assert.ok(shown.includes('port-in-use'), shown)
+})
+hookTest('a listener that moved aside names the port invitations must use', async (t) => {
+  const start = state('unpaired', { listener: { status: 'listening', host: '127.0.0.1', port: 40203, configuredPort: 3081, fallback: true, error: null, attempts: 0 } })
+  const ui = await mount(t, start, answer(start))
+  const shown = ui.all()
+  assert.ok(shown.includes('3081'), shown)
+  assert.ok(shown.includes('40203'), shown)
+  assert.ok(!shown.includes('The sync listener is not running'), shown)
+})
+hookTest('a listener that is bound renders no alert', async (t) => {
+  const start = state('unpaired', { listener: { status: 'listening', host: '127.0.0.1', port: 3081, error: null, attempts: 0 } })
+  const ui = await mount(t, start, answer(start))
+  assert.ok(!ui.all().includes('The sync listener is not running'), ui.all())
+})
+hookTest('an unknown host code is shown instead of collapsing into a generic failure', async (t) => {
+  const ui = await mount(t, state(), () => response({ ok: false, error: 'body-timeout' }, 408))
+  const shown = ui.all()
+  assert.ok(shown.includes('body-timeout'), shown)
+  assert.ok(shown.includes('Could not read device sync settings'), shown)
+})
+
 hookTest('the plugin list comes from inventory and unchecking writes scope with default deny', async (t) => {
   const start = state('center', { policy: policy({ include: ['alpha', 'beta'] }) })
   const ui = await mount(t, start, answer(start))
@@ -290,7 +319,7 @@ hookTest('advice adds missing plugins and adopts a suggestion through the API', 
 
 hookTest('an incoming proposal can be accepted or rejected from the sync card', async (t) => {
   const start = state('center', {
-    center: { deviceId: 'c1', label: 'Office', lastContact: '2026-01-01T00:00:00.000Z' },
+    center: { deviceId: 'c1', label: 'Office', lastSeen: '2026-01-01T00:00:00.000Z' },
     proposals: [{ id: 'p1', status: 'pending', origin: { label: 'Office' }, keys: ['alpha'] }],
   })
   const ui = await mount(t, start, answer(start))
@@ -301,7 +330,7 @@ hookTest('an incoming proposal can be accepted or rejected from the sync card', 
 
 hookTest('applying a plan approves the selected operations and then applies it', async (t) => {
   const start = state('center', {
-    center: { deviceId: 'c1', label: 'Office', lastContact: '2026-01-01T00:00:00.000Z' },
+    center: { deviceId: 'c1', label: 'Office', lastSeen: '2026-01-01T00:00:00.000Z' },
     lastPlan: {
       planId: 'plan1', kind: 'plugin', operations: [
         { opId: 'op1', key: 'alpha', action: 'enable', risk: 'normal' },
@@ -338,6 +367,7 @@ hookTest('the center publishes local changes while a member compares and propose
 hookTest('a point-to-point listener can create an invitation until a peer connects', async (t) => {
   const listenerState = state('peer')
   const ui = await mount(t, listenerState, answer(listenerState, { invite: () => success({ token: 'tok-1', expiresAt: '2026-01-02' }) }))
+  await ui.fill('http://192.0.2.10:3081', 'http://192.0.2.10:3081')
   const invite = ui.button('Invite a new device')
   assert.equal(invite.props.disabled, false)
   await ui.click('Invite a new device')
@@ -348,6 +378,7 @@ hookTest('a point-to-point listener can create an invitation until a peer connec
 hookTest('invitations render the token and never leak configuration values', async (t) => {
   const start = state('center', { center: { deviceId: 'c1', label: 'Office' } })
   const ui = await mount(t, start, answer(start, { invite: () => success({ token: 'invite-token-123', expiresAt: '2026-01-02' }) }))
+  await ui.fill('http://192.0.2.10:3081', 'http://192.0.2.10:3081')
   await ui.click('Invite a new device')
   assert.ok(ui.all().includes('invite-token-123'))
   assert.ok(!ui.all().includes('SECRET-VALUE'))
@@ -419,12 +450,23 @@ hookTest('an invitation link is parsed and the connection stays locked until ver
   const ui = await mount(t, start, answer(start, { verify: () => success({ verified: true, center: { deviceId: 'c1', role: 'center' }, topology: 'center' }) }))
   await ui.click('I connect to another device')
   await ui.fill('Paste the full link shared by the other device', 'http://192.0.2.10:3080/plugin-sync/join?invite=tok-123')
-  await ui.click('Parse link')
+  assert.ok(ui.all().includes('Link parsed. Verify it before connecting.'))
   await ui.click('Verify link')
   const verified = ui.requests.filter((item) => item.action === 'verify').at(-1)
   assert.equal(verified.url, 'http://192.0.2.10:3080')
   assert.equal(verified.token, 'tok-123')
   assert.ok(ui.all().includes('Verified'), ui.all())
+})
+
+hookTest('invitation parsing rejects wrong routes and fragments', async (t) => {
+  const start = state('unpaired')
+  const ui = await mount(t, start, answer(start))
+  await ui.click('I connect to another device')
+  await ui.fill('Paste the full link shared by the other device', 'http://192.0.2.10:3081/wrong?invite=tok-123')
+  assert.ok(ui.all().includes('Invalid invitation.'), ui.all())
+  assert.equal(ui.button('Verify link').props.disabled, true)
+  await ui.fill('Paste the full link shared by the other device', 'ssh://user@192.0.2.10/wrong?invite=tok-123')
+  assert.equal(ui.button('Verify link').props.disabled, true)
 })
 
 hookTest('agent advice opens a new chat prefilled with the installed plugin list', async (t) => {
@@ -452,6 +494,108 @@ hookTest('SSH key path has a host-side picker and no separate invitation code fi
   assert.equal(ui.requests.filter((item) => item.action === 'pickFile').length, 1)
   assert.ok(ui.inputValues().includes('C:\\keys\\id_ed25519'))
   assert.equal(ui.all().includes('Invitation code'), false)
+})
+
+hookTest('a paired member can explicitly confirm the saved connection', async (t) => {
+  const start = state('device', { center: { deviceId: 'c1', label: 'Office', lastSeen: null } })
+  const ui = await mount(t, start, answer(start, { confirmConnection: () => success({ status: 'ok', label: 'Office', lastSeen: '2026-01-02' }) }))
+  await ui.click('Confirm connection')
+  assert.equal(ui.requests.filter((item) => item.action === 'confirmConnection').length, 1)
+  assert.ok(ui.all().includes('Connection confirmed.'), ui.all())
+})
+
+hookTest('a center configures a complete SSH invitation without a private key', async (t) => {
+  const start = state('center')
+  const ui = await mount(t, start, answer(start, { invite: () => success({ token: 'ssh-token', expiresAt: '2026-01-02' }) }))
+  await ui.click('SSH tunnel')
+  assert.ok(ui.all().includes('Download / install this plugin'), ui.all())
+  assert.equal(ui.button('Invite a new device').props.disabled, true)
+  assert.equal(ui.all().includes('Private key file'), false)
+  await ui.fill('203.0.113.10 or sync.example.com', '203.0.113.10')
+  await ui.fill('For example ubuntu', 'ubuntu')
+  assert.equal(ui.button('Invite a new device').props.disabled, false)
+  await ui.click('Invite a new device')
+  assert.ok(ui.all().includes('ssh://ubuntu@203.0.113.10/plugin-sync/join?invite=ssh-token&remote=3081&port=22'), ui.all())
+})
+
+hookTest('SSH authority ports and HTTP invitation ports survive mode changes', async (t) => {
+  const start = state('unpaired')
+  const ui = await mount(t, start, answer(start, { verify: () => success({ verified: true, center: { deviceId: 'c1', role: 'center' }, topology: 'center' }) }))
+  await ui.click('I connect to another device')
+  await ui.fill('Paste the full link shared by the other device', 'http://192.0.2.10:4444/plugin-sync/join?invite=port-token')
+  await ui.click('SSH tunnel')
+  await ui.fill('203.0.113.10 or sync.example.com', '203.0.113.10')
+  await ui.fill('For example ubuntu', 'ubuntu')
+  await ui.fill('~/.ssh/id_ed25519', '~/.ssh/id_ed25519')
+  await ui.click('Verify link')
+  assert.equal(ui.requests.filter((item) => item.action === 'verify').at(-1).ssh.remotePort, 4444)
+
+  await ui.fill('Paste the full link shared by the other device', 'ssh://ubuntu@203.0.113.10:2222/plugin-sync/join?invite=ssh-port-token&remote=3081')
+  await ui.click('Verify link')
+  assert.equal(ui.requests.filter((item) => item.action === 'verify').at(-1).ssh.port, 2222)
+})
+
+hookTest('SSH invites reject host:port but accept IPv6 hosts', async (t) => {
+  const start = state('center')
+  const ui = await mount(t, start, answer(start, { invite: () => success({ token: 'ipv6-token', expiresAt: '2026-01-02' }) }))
+  await ui.click('SSH tunnel')
+  await ui.fill('203.0.113.10 or sync.example.com', '203.0.113.10:2222')
+  await ui.fill('For example ubuntu', 'ubuntu')
+  assert.equal(ui.button('Invite a new device').props.disabled, true)
+  await ui.fill('203.0.113.10 or sync.example.com', '2001:db8::1')
+  assert.equal(ui.button('Invite a new device').props.disabled, false)
+  await ui.click('Invite a new device')
+  assert.ok(ui.all().includes('ssh://ubuntu@[2001:db8::1]/plugin-sync/join?invite=ipv6-token&remote=3081&port=22'), ui.all())
+})
+
+hookTest('LAN and public invites warn when the listener is loopback-only', async (t) => {
+  const start = state('center', { syncHost: '127.0.0.1' })
+  const ui = await mount(t, start, answer(start))
+  await ui.fill('http://192.0.2.10:3081', '192.0.2.10')
+  assert.ok(ui.all().includes('This sync service listens only on a loopback address'), ui.all())
+})
+
+hookTest('parsing an SSH invitation preserves hand-entered host, user and key when the link omits them', async (t) => {
+  const start = state('unpaired')
+  const ui = await mount(t, start, answer(start, {
+    verify: () => success({ verified: true, center: { deviceId: 'p1', role: 'peer' }, topology: 'p2p' }),
+  }))
+  await ui.click('I connect to another device')
+  await ui.click('SSH tunnel')
+  await ui.fill('203.0.113.10 or sync.example.com', '203.0.113.10')
+  await ui.fill('For example ubuntu', 'ubuntu')
+  await ui.fill('~/.ssh/id_ed25519', '~/.keys/id_ed25519')
+  await ui.fill('Paste the full link shared by the other device', 'ssh:///plugin-sync/join?invite=legacy-token&remote=3081&port=22')
+  assert.ok(ui.inputValues().includes('203.0.113.10'))
+  assert.ok(ui.inputValues().includes('ubuntu'))
+  assert.ok(ui.inputValues().includes('~/.keys/id_ed25519'))
+  assert.ok(ui.all().includes('The link does not include SSH host / SSH user; your existing values were kept.'), ui.all())
+  await ui.click('Verify link')
+  const verified = ui.requests.filter((item) => item.action === 'verify').at(-1)
+  assert.deepEqual(verified.ssh, { kind: 'ssh', host: '203.0.113.10', user: 'ubuntu', identityFile: '~/.keys/id_ed25519', port: 22, remotePort: 3081 })
+  await ui.fill('203.0.113.10 or sync.example.com', '203.0.113.11')
+  assert.equal(ui.all().includes('Verified'), false)
+  assert.equal(ui.button('Connect').props.disabled, true)
+  await ui.click('Verify link')
+  await ui.click('Connect')
+  const joined = ui.requests.filter((item) => item.action === 'connectPeer').at(-1)
+  assert.ok(joined, 'verification must select the topology advertised by the peer')
+})
+
+hookTest('direct invitations require an explicit reachable address and keep its sync port', async (t) => {
+  const start = state('center')
+  const ui = await mount(t, start, answer(start, { invite: () => success({ token: 'lan-token', expiresAt: '2026-01-02' }) }))
+  assert.equal(ui.button('Invite a new device').props.disabled, true)
+  await ui.fill('http://192.0.2.10:3081', '192.0.2.10:4444')
+  await ui.click('Invite a new device')
+  assert.ok(ui.all().includes('http://192.0.2.10:4444/plugin-sync/join?invite=lan-token'), ui.all())
+})
+
+hookTest('scope rules visibly override selected plugins', async (t) => {
+  const start = state('center', { policy: policy({ include: ['alpha', 'beta'], exclude: ['alpha'] }) })
+  const ui = await mount(t, start, answer(start))
+  assert.ok(ui.all().includes('Blocked by rule: Never sync these'), ui.all())
+  assert.ok(ui.all().includes('Rules override plugin checkboxes'), ui.all())
 })
 
 hookTest('scope owns rules and allowed changes, advanced no longer offers model review', async (t) => {

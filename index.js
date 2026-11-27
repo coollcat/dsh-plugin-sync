@@ -23,6 +23,10 @@ export const inject = ['pluginManager', 'configEditor', 'webServer', 'credential
 
 const PLUGIN_NAME = '@local/dsh-plugin-sync'
 const ROUTE_PREFIX = '/plugin-sync'
+// The sync listener retries instead of giving up: a second instance on the same
+// profile holds the port until it exits, and that should not need a restart.
+const LISTENER_RETRY_MS = 15000
+const LISTENER_RETRY_LIMIT = 40
 // Local link:/file: bundles are reproducible on their own device only: the
 // absolute path differs per machine, so a cross-device install would be wrong.
 // Represent them as a content-addressed file source (name + sha256 of the
@@ -264,6 +268,17 @@ export function syncServerConfig(config = {}, fallbackHost = '127.0.0.1') {
   return { host, port }
 }
 
+// Listener failures are the one startup error a user can act on, so they get
+// their own closed codes instead of disappearing into the host log.
+export function listenerErrorCode(error) {
+  switch (error?.code) {
+    case 'EADDRINUSE': return 'port-in-use'
+    case 'EACCES': return 'port-forbidden'
+    case 'EADDRNOTAVAIL': return 'address-unavailable'
+    default: return 'listen-failed'
+  }
+}
+
 // Only closed, known codes cross the HTTP boundary. Provider messages and raw
 // exceptions can carry paths or credentials, so everything else is generic;
 // the browser maps these codes to readable text in both locales.
@@ -358,10 +373,28 @@ export function apply(ctx, config) {
 
   const syncServer = syncServerConfig(config, ctx.get('webServer')?.host)
 
+  // Listener health is part of the panel's state on purpose. A second DSH
+  // instance on the same profile holds the sync port, and the first version
+  // only wrote a warning to the host log: the panel looked healthy while every
+  // invitation failed. Failures now surface as a closed code in `state.listener`
+  // and retry on a timer, so a stale holder clearing up needs no restart here.
+  // `port` is the port this instance actually serves on; `configuredPort` is
+  // what the profile asked for. They differ when another DSH instance holds the
+  // configured port: the first instance keeps it and this one moves aside, so a
+  // second instance can never silently disable the first one's sync.
+  const listener = {
+    status: 'starting', host: syncServer.host, port: syncServer.port, configuredPort: syncServer.port,
+    fallback: false, error: null, attempts: 0,
+  }
+  // Retry cadence is configurable only so the recovery path is testable; the
+  // default is the interval the panel promises in its warning.
+  const retryDelay = Number.isInteger(config?.syncRetryMs) && config.syncRetryMs >= 10 ? config.syncRetryMs : LISTENER_RETRY_MS
+  let retryTimer = null
+
   const localAction = async (name, args) => {
     args = { ...args, actor: 'user' }
     switch (name) {
-      case 'state': return { ...engine.publicState(), syncPort: syncServer.port }
+      case 'state': return { ...engine.publicState(), syncPort: listener.port, syncHost: syncServer.host, listener: { ...listener } }
       case 'pickFile': return { path: await pickKeyFilePath() }
       case 'inventory': return resourceCatalogue(adapters)
       case 'archiveDecisions': return engine.archiveDecisions({ actor: 'user' })
@@ -373,6 +406,7 @@ export function apply(ctx, config) {
       case 'pairCenter': return engine.pairCenter(args)
       case 'joinCenter': return engine.joinCenter(args)
       case 'verify': return engine.verifyInvitation(args)
+      case 'confirmConnection': return engine.confirmConnection(args)
       case 'reset': return engine.resetSync()
       case 'invite': return engine.createInvitation()
       case 'policy': return engine.setPolicy(args.policy)
@@ -395,19 +429,46 @@ export function apply(ctx, config) {
     }
   }
 
-  const errorResponse = (res, error) => sendJson(
-    res, error instanceof HostError ? error.status : 400, { error: publicErrorCode(error) })
+  // The browser only ever sees a closed code, so the one place the real error
+  // can be read is the host log. An unmapped failure used to return
+  // "request-failed" and leave nothing behind to search for.
+  const errorResponse = (res, error, where) => {
+    if (publicErrorCode(error) === 'request-failed') {
+      ctx.logger?.warn?.(`device-sync: ${where} request failed with an unmapped error`, error)
+    }
+    return sendJson(res, error instanceof HostError ? error.status : 400, { error: publicErrorCode(error) })
+  }
+  const connection = ctx.get('connection')
 
   // Web GUI listener: same-origin browser actions only.
-  const localHandler = async (req, res) => {
+  const localHandler = async (req, res, peer) => {
     try {
       const pathname = new URL(req.url ?? '/', 'http://localhost').pathname
       if ([`${ROUTE_PREFIX}/api/action`, `${ROUTE_PREFIX}/api/state`].includes(pathname)) {
-        const connection = ctx.get('connection')
-        if (!connection) return sendJson(res, 403, { error: 'local-access-required' })
-        const rejection = connection.requestRejection(req)
-        if (rejection) return sendJson(res, rejection, { error: 'local-access-required' })
-        jsonRequestGate(req, { local: true, protocol: ctx.get('webServer')?.protocol ?? 'http:' })
+        // WebServer has already applied its authentication and source policy
+        // before dispatch. Current DSH passes the admitted PeerScope as the third
+        // argument; direct callers may instead expose connection.admit(), whose
+        // result is a { peer } / { rejection } union rather than the Peer itself.
+        let currentPeer = peer
+        let legacyRejection
+        if (!currentPeer && typeof connection?.admit === 'function') {
+          const admission = connection.admit({
+            headers: req.headers ?? {}, method: req.method, url: req.url,
+            signal: req.signal, socket: req.socket,
+          })
+          currentPeer = admission?.peer ?? (admission?.principal ? admission : undefined)
+          legacyRejection = admission?.rejection
+        }
+        // Older DSH releases exposed only requestRejection(). Keep that fallback
+        // without calling a removed method on current hosts.
+        if (!currentPeer && !legacyRejection && typeof connection?.requestRejection === 'function') {
+          legacyRejection = connection.requestRejection(req)
+          if (!legacyRejection) currentPeer = { principal: { kind: 'owner' } }
+        }
+        if (legacyRejection || !currentPeer || currentPeer.principal?.kind !== 'owner') {
+          return sendJson(res, legacyRejection ?? 403, { error: 'local-access-required' })
+        }
+        jsonRequestGate(req, { local: true })
         const body = await readBody(req)
         if (typeof body.action !== 'string' || !body.action) throw new HostError('action-required')
         const result = await localAction(body.action, body)
@@ -416,7 +477,7 @@ export function apply(ctx, config) {
       }
       return sendJson(res, 404, { error: 'not-found' })
     } catch (error) {
-      return errorResponse(res, error)
+      return errorResponse(res, error, 'local')
     }
   }
 
@@ -434,12 +495,12 @@ export function apply(ctx, config) {
       const body = await readBody(req)
       validateRemoteBody(pathname, body)
       let result
-      if (pathname === `${ROUTE_PREFIX}/hello`) result = await engine.handleHello({ token, identity: body.identity })
+      if (pathname === `${ROUTE_PREFIX}/hello`) result = await engine.handleHello({ token, identity: body.identity, verify: body.verify === true })
       else if (pathname === `${ROUTE_PREFIX}/state`) result = await engine.handleGetState({ token, deviceId: body.deviceId, offer: body.offer, acknowledgedOffers: body.acknowledgedOffers })
       else result = await engine.handleSubmitProposal({ token, identity: body.identity, changeset: body.changeset })
       return sendJson(res, businessStatus(result), result)
     } catch (error) {
-      return errorResponse(res, error)
+      return errorResponse(res, error, 'remote')
     }
   }
 
@@ -448,10 +509,51 @@ export function apply(ctx, config) {
   ctx.effect(() => webServer.register({ kind: 'prefix', path: ROUTE_PREFIX, handler: localHandler }), 'device-sync: local routes')
 
   const server = http.createServer(remoteHandler)
-  server.on('error', (error) => ctx.logger?.warn?.('device-sync: sync listener error', error))
+  let stopped = false
+  server.on('listening', () => {
+    clearTimeout(retryTimer); retryTimer = null
+    const bound = server.address()
+    listener.port = typeof bound === 'object' && bound ? bound.port : listener.configuredPort
+    listener.status = 'listening'
+    listener.error = null
+    listener.attempts = 0
+  })
+  server.on('error', (error) => {
+    listener.status = 'error'
+    listener.error = listenerErrorCode(error)
+    ctx.logger?.warn?.(`device-sync: cannot listen on ${listener.host}:${listener.port} (${listener.error})`, error)
+    // The configured port is taken by another instance of this profile: take an
+    // OS-assigned port instead of leaving this panel permanently broken.
+    if (listener.error === 'port-in-use' && !listener.fallback && !stopped) {
+      listener.fallback = true
+      try { server.listen(0, listener.host); return } catch (failure) {
+        ctx.logger?.warn?.('device-sync: fallback port failed', failure)
+      }
+    }
+    if (retryTimer || listener.attempts >= LISTENER_RETRY_LIMIT) return
+    listener.attempts += 1
+    retryTimer = setTimeout(() => {
+      retryTimer = null
+      if (stopped || server.listening) return
+      try { server.listen(listener.port, listener.host) } catch (failure) {
+        ctx.logger?.warn?.('device-sync: sync listener retry failed', failure)
+      }
+    }, retryDelay)
+    retryTimer.unref?.()
+  })
   ctx.effect(() => {
-    server.listen(syncServer.port, syncServer.host)
-    return () => { server.close(); server.closeAllConnections?.() }
+    try { server.listen(syncServer.port, syncServer.host) } catch (error) {
+      // listen() throws synchronously only for malformed arguments; keep the
+      // failure visible instead of failing the whole plugin load.
+      listener.status = 'error'
+      listener.error = listenerErrorCode(error)
+      ctx.logger?.warn?.(`device-sync: cannot listen on ${listener.host}:${listener.port} (${listener.error})`, error)
+    }
+    return () => {
+      stopped = true
+      clearTimeout(retryTimer); retryTimer = null
+      try { server.close(); server.closeAllConnections?.() } catch { /* never bound */ }
+    }
   }, 'device-sync: sync listener')
 
   // Read-only / proposal actions only. Approval, policy changes and apply stay
@@ -505,7 +607,7 @@ export function apply(ctx, config) {
   }, 'device-sync: scheduler')
 
   // Returned for the HTTP harness: two listeners with distinct trust planes.
-  return { localHandler, remoteHandler, server, syncServer }
+  return { localHandler, remoteHandler, server, syncServer, listener }
 }
 
 // Agent inspection receives metadata only, including on direct check/proposals
@@ -526,6 +628,7 @@ function validateRemoteBody(route, body) {
     if (body.acknowledgedOffers !== undefined && (!Array.isArray(body.acknowledgedOffers) || body.acknowledgedOffers.length > 512 || body.acknowledgedOffers.some(id => typeof id !== 'string' || !id || id.length > 128))) throw new HostError('invalid-acknowledged-offers')
   } else {
     if (validateIdentity(identity).length) throw new HostError('invalid-identity')
+    if (body.verify !== undefined && typeof body.verify !== 'boolean') throw new HostError('invalid-body')
     if (route.endsWith('/proposals') && validateChangeset(body.changeset).length) throw new HostError('invalid-changeset')
   }
 }

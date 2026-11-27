@@ -7,7 +7,7 @@ window.__ModuleLoader__.load({
     const en = {
       tab: 'Device sync', settings: 'Device sync',
       loading: 'Reading device sync…', retry: 'Retry', loadingFailed: 'Could not read device sync settings.',
-      busy: 'Working…', done: 'Done', failed: 'The operation failed.', saved: 'Saved',
+      busy: 'Working…', done: 'Done', connected: 'Connected.', inviteCreated: 'Invitation created. Copy the link and send it privately.', keySelected: 'Private key selected.', failed: 'The operation failed.', saved: 'Saved',
       network: 'Network unavailable. Check the connection and retry.', offline: 'The remote request failed.',
       unauthorized: 'Not authorized.', 'not-found': 'Sync service unavailable.', suspended: 'Sync is paused.',
       expired: 'Plan expired. Compare again.', 'plan-not-found': 'Plan unavailable. Compare again.',
@@ -21,6 +21,16 @@ window.__ModuleLoader__.load({
       'signature-required': 'A verified signature is required.', 'already-paired': 'This profile is already paired.',
       'no-approval': 'Approve selected operations first.', 'no-operation-approved': 'Approve at least one operation.',
       'bad-response': 'The sync service returned an invalid response.', 'topology-bound-to-role': 'The connection type is fixed for this paired profile.',
+      'role-mismatch': 'The invitation does not match this connection type.', 'bad-remote-identity': 'The other device returned an invalid identity.',
+      'ssh-failed': 'SSH failed. Check the host, user, key permissions and that the server allows TCP forwarding.',
+      listenerDown: 'The sync listener is not running, so no device can reach this one.',
+      'port-in-use': 'Port {port} is already taken — usually another DSH instance started with the same profile. Close it and this panel recovers on its own.',
+      'port-forbidden': 'The system refused port {port}. Pick another sync port or run without privileged-port restrictions.',
+      'address-unavailable': 'The configured sync address {host} does not exist on this machine.',
+      'listen-failed': 'The sync listener could not start.',
+      listenerRetry: 'Retrying automatically every 15s.',
+      listenerMoved: 'Port {configured} is held by another DSH instance, so sync moved to port {port}. Use that port in invitations and in the peer address.',
+      withCode: '{text} ({code})',
       unpaired: 'Not paired', center: 'Center', device: 'Device', peer: 'Peer',
       waitingForPeer: 'Waiting for the other device', unconfirmed: 'Connection not yet confirmed',
       recentSuccess: 'Last request succeeded', recentFailure: 'Last request failed',
@@ -29,11 +39,30 @@ window.__ModuleLoader__.load({
       createCenter: 'Let another device connect to me', joinCenter: 'I connect to another device', listenPeer: 'Direct between two devices',
       revoke: 'Revoke', revoked: 'Access revoked', invite: 'Invite a new device', hideInvite: 'Hide',
       inviteExpires: 'Expires', inviteHint: 'Send this link to the other device. It works once and expires in 24 hours.',
-      joinUrl: 'Address', joinKind: 'The other device is a', ssh: 'Use an SSH tunnel (optional)',
-      sshHost: 'SSH host', sshUser: 'User', sshIdentity: 'Private key file', sshPort: 'SSH port',
+      joinUrl: 'Sync address', joinSteps: '1 Paste the invitation → 2 Verify → 3 Connect', ssh: 'Use an SSH tunnel (optional)',
+      sshHost: 'SSH host', sshUser: 'SSH user', sshIdentity: 'Private key file', sshPort: 'SSH port',
+      sshHostPlaceholder: '203.0.113.10 or sync.example.com', sshUserPlaceholder: 'For example ubuntu', sshPortPlaceholder: '22',
+      sshIdentityPlaceholder: '~/.ssh/id_ed25519',
       sshHint: 'Uses the system OpenSSH client with the private key path below. The host key is verified on first connection and remembered; the plugin never stores your key.',
-      sshHostRequired: 'Fill in the SSH host yourself. The link does not contain it, and nothing invented is ever used.',
-      sshHostInvalid: 'That host cannot be used in an SSH link. Letters, digits, dot, colon and hyphen only; no spaces, brackets or slashes.',
+      sshHostRequired: 'Fill in the SSH host. If the link omitted it, your existing value is kept.',
+      sshUserRequired: 'Fill in the SSH user. If the link omitted it, your existing value is kept.',
+      sshInviteHostRequired: 'Enter the SSH host other devices will use to reach this device.',
+      sshInviteUserRequired: 'Enter the SSH user other devices will use to sign in.',
+      sshIdentityRequired: 'Choose the private key on this device.',
+      sshHostInvalid: 'Enter a hostname, IPv4 address or IPv6 address. Do not include a port, spaces, brackets or slashes.',
+      sshUserInvalid: 'Use a valid SSH user: letters, digits, underscore, dot or hyphen.',
+      sshPortInvalid: 'SSH port must be between 1 and 65535.',
+      sshInviteHint: 'Only the host, user and port go into the invitation. The other device uses its own private key.',
+      sshTargetHint: 'The invitation is tunneled to 127.0.0.1:{port}; no public sync address is needed.',
+      linkMissingSsh: 'The link does not include {fields}; your existing values were kept.',
+      inviteSettings: 'Invitation settings',
+      inviteAddress: 'Address other devices use to reach this sync service',
+      inviteAddressRequired: 'Enter a reachable sync address before creating an invitation.',
+      inviteAddressInvalid: 'Enter an HTTP(S) base address without credentials, query or fragment.',
+      inviteHttpsRequired: 'Public invitations require an https:// address.',
+      inviteLoopbackWarn: 'This address only works on the same computer. Use a LAN or public address for another device.',
+      inviteListenerLoopbackWarn: 'This sync service listens only on a loopback address. Direct invitations need a reachable listener; a reverse proxy may forward to it, or use SSH.',
+      rulesOverride: 'Rules override plugin checkboxes: anything matching “Never sync these” or “Keep only on this device” will not sync.',
       secureHint: 'Use HTTPS on public networks, plain HTTP only on a trusted LAN, or an SSH tunnel. Anyone with the invitation link can use it.',
       advice: 'Suggestions', adviceHint: 'Based on this device, applied in one click',
       notIncluded: 'plugins are not in the sync scope', adoptAll: 'Add all', allIncluded: 'All included',
@@ -65,6 +94,8 @@ window.__ModuleLoader__.load({
       highRisk: 'Needs your approval', applyFailedHere: 'Failed', conflictBlocked: 'Resolve the conflict first',
       connections: 'Connections', connectionsHint: 'Which devices exchange this content',
       online: 'Online', offlineState: 'Offline', lastContact: 'Last contact', noPeers: 'No device connected yet.',
+      confirmConnection: 'Confirm connection', connectionConfirmed: 'Connection confirmed.', confirmationRequiresMember: 'Only the connecting device can actively confirm. Ask it to click “Confirm connection”.',
+      downloadPlugin: 'Download / install this plugin', downloadPluginHint: 'Install it on the other device before using the invitation.',
       joinDifferent: 'Connect to another device', setupHint: 'Choose how to connect first.',
       moreCard: 'More', snapshot: 'Offline snapshot', snapshotHint: 'One file that carries the current scope',
       exportSnapshot: 'Export', importSnapshot: 'Import', snapshotText: 'Snapshot JSON',
@@ -80,7 +111,7 @@ window.__ModuleLoader__.load({
       enable: 'Enable plugins', disable: 'Disable plugins', configSet: 'Write plugin config',
       rules: 'Rules', excludeLabel: 'Never sync these', localOnlyLabel: 'Keep only on this device',
       noRules: 'No rules', addRule: 'Add', remove: 'Remove', rulePlaceholder: 'Plugin name or * pattern',
-      noProtected: 'Protected system plugins are never synced.',
+      noProtected: 'Protected system plugins are never synced.', ruleBlocked: 'Blocked by rule',
       heroTitle: 'Device sync',
       heroHint: 'First choose how this device connects, then decide what moves between devices. Changes save as you go.',
       groupSetup: '1 · Set up',
@@ -106,10 +137,11 @@ window.__ModuleLoader__.load({
       netPublic: 'Public network', netPublicDesc: 'HTTPS address with an invitation link; keep the link private',
       lanHint: 'LAN uses http://IP:3081. The invitation link is the only credential — send it privately.',
       sshModeHint: 'SSH uses your key as the credential. Fill in the SSH host, user, key path and port (default 22).',
+      sshInviteModeHint: 'SSH invitations include the host, user and port. No private key is needed on this device.',
       publicHint: 'Public access must use https:// on the sync port and an invitation link. Anyone with the link can join.',
       inviteLink: 'Invitation link', inviteLinkHint: 'Paste the full link shared by the other device',
       parseLink: 'Parse link', linkParsed: 'Link parsed. Verify it before connecting.',
-      verifyLink: 'Verify link', verified: 'Verified',
+      verifyLink: 'Verify link', verified: 'Verified', connect: 'Connect',
       'verify-failed': 'The link or token could not be verified.',
       'ssh-client-not-found': 'No system ssh client found. Install OpenSSH and make sure ssh is on PATH.',
       'pick-file-unavailable': 'The host cannot open a file dialog. Type the absolute key path instead.',
@@ -132,7 +164,7 @@ window.__ModuleLoader__.load({
     const zh = {
       tab: '设备同步', settings: '设备同步',
       loading: '正在读取设备同步…', retry: '重试', loadingFailed: '无法读取设备同步设置。',
-      busy: '正在处理…', done: '完成', failed: '操作失败。', saved: '已保存',
+      busy: '正在处理…', done: '完成', connected: '已连接。', inviteCreated: '邀请已创建，请复制链接并私下发送。', keySelected: '已选择私钥。', failed: '操作失败。', saved: '已保存',
       network: '网络不可用，请检查连接后重试。', offline: '对端请求失败。',
       unauthorized: '未获授权。', 'not-found': '同步服务不可用。', suspended: '同步已暂停。',
       expired: '计划已过期，请重新比对。', 'plan-not-found': '计划不可用，请重新比对。',
@@ -146,6 +178,16 @@ window.__ModuleLoader__.load({
       'signature-required': '这里要求验证签名。', 'already-paired': '本设备已经配对。',
       'no-approval': '请先批准选中的操作。', 'no-operation-approved': '至少要批准一项操作。',
       'bad-response': '同步服务返回了无效响应。', 'topology-bound-to-role': '已配对设备的连接类型不能再改。',
+      'role-mismatch': '邀请与当前连接类型不匹配。', 'bad-remote-identity': '对方返回的设备身份无效。',
+      'ssh-failed': 'SSH 连接失败，请检查主机、用户、私钥权限，以及服务器是否允许 TCP 转发。',
+      listenerDown: '同步监听没有起来，别的设备连不上这台。',
+      'port-in-use': '端口 {port} 已被占用，通常是另一个用同一 profile 启动的 DSH 实例。关掉它，这里会自动恢复。',
+      'port-forbidden': '系统拒绝绑定端口 {port}。换一个同步端口，或去掉特权端口限制。',
+      'address-unavailable': '配置的同步地址 {host} 在本机不存在。',
+      'listen-failed': '同步监听启动失败。',
+      listenerRetry: '每 15 秒自动重试。',
+      listenerMoved: '端口 {configured} 被另一个 DSH 实例占用，同步已改用 {port}；邀请链接和对方填写地址都要用这个端口。',
+      withCode: '{text}（{code}）',
       unpaired: '未配对', center: '中心', device: '设备', peer: '点对点',
       waitingForPeer: '等待对方连接', unconfirmed: '连接还没确认',
       recentSuccess: '最近请求成功', recentFailure: '最近请求失败',
@@ -154,11 +196,30 @@ window.__ModuleLoader__.load({
       createCenter: '让别的设备连我', joinCenter: '我去连别的设备', listenPeer: '两台设备直连',
       revoke: '撤销', revoked: '已撤销', invite: '邀请新设备', hideInvite: '收起',
       inviteExpires: '到期', inviteHint: '把邀请链接发给对方，24 小时内有效，用一次就失效。',
-      joinUrl: '对方地址', joinKind: '对方是', ssh: '走 SSH 隧道（可选）',
-      sshHost: 'SSH 主机', sshUser: '用户', sshIdentity: '私钥文件', sshPort: 'SSH 端口',
+      joinUrl: '同步地址', joinSteps: '1 粘贴邀请 → 2 验证 → 3 连接', ssh: '走 SSH 隧道（可选）',
+      sshHost: 'SSH 主机', sshUser: 'SSH 用户', sshIdentity: '私钥文件', sshPort: 'SSH 端口',
+      sshHostPlaceholder: '例如 203.0.113.10 或 sync.example.com', sshUserPlaceholder: '例如 ubuntu', sshPortPlaceholder: '22',
+      sshIdentityPlaceholder: '~/.ssh/id_ed25519',
       sshHint: '用下面填写的私钥路径调用系统 OpenSSH；首次连接自动记录主机指纹，之后指纹变化会拒绝。插件不保存你的私钥。',
-      sshHostRequired: '请自己填写 SSH 主机。链接里不带主机，也不会用任何编造的地址代替。',
-      sshHostInvalid: '这个主机名不能写进 SSH 链接：只允许字母、数字、点、冒号和连字符，不能有空格、方括号或斜杠。',
+      sshHostRequired: '请填写 SSH 主机；链接没带时会保留你已填的值。',
+      sshUserRequired: '请填写 SSH 用户；链接没带时会保留你已填的值。',
+      sshInviteHostRequired: '请填写对方连接本机使用的 SSH 主机。',
+      sshInviteUserRequired: '请填写对方登录本机使用的 SSH 用户。',
+      sshIdentityRequired: '请选择本机使用的私钥。',
+      sshHostInvalid: '请填写主机名、IPv4 或 IPv6 地址；不要带端口、空格、方括号或斜杠。',
+      sshUserInvalid: 'SSH 用户只能包含字母、数字、下划线、点和连字符。',
+      sshPortInvalid: 'SSH 端口必须在 1–65535 之间。',
+      sshInviteHint: '邀请链接只带主机、用户和端口；对方使用自己的私钥连接。',
+      sshTargetHint: '邀请通过隧道转发到 127.0.0.1:{port}，不需要公网同步地址。',
+      linkMissingSsh: '链接未包含 {fields}，已保留你原来填写的值。',
+      inviteSettings: '邀请设置',
+      inviteAddress: '其他设备访问本机同步服务的地址',
+      inviteAddressRequired: '创建邀请前请填写可访问的同步地址。',
+      inviteAddressInvalid: '请填写不带用户名、密码、查询参数或片段的 HTTP(S) 基础地址。',
+      inviteHttpsRequired: '公网邀请必须使用 https:// 地址。',
+      inviteLoopbackWarn: '这个地址只能在同一台电脑上用；连接另一台设备请填局域网或公网地址。',
+      inviteListenerLoopbackWarn: '本机同步服务只监听回环地址；直连邀请需要可达的监听地址，可由反向代理转发，或改用 SSH。',
+      rulesOverride: '规则优先于插件勾选：命中「不同步这些」或「只留在这台设备」的插件不会同步。',
       secureHint: '公网用 HTTPS，可信局域网才用明文 HTTP，或用 SSH 隧道。拿到邀请链接的人就能连，请私下发送。',
       advice: '建议', adviceHint: '按这台设备的现状给出，点一下就应用',
       notIncluded: '个插件还没纳入同步', adoptAll: '全部纳入', allIncluded: '都已纳入',
@@ -190,6 +251,8 @@ window.__ModuleLoader__.load({
       highRisk: '要你确认', applyFailedHere: '失败', conflictBlocked: '先处理冲突',
       connections: '连接', connectionsHint: '和哪些设备交换内容',
       online: '在线', offlineState: '离线', lastContact: '最近联系', noPeers: '还没有连上设备。',
+      confirmConnection: '确认连接', connectionConfirmed: '连接已确认。', confirmationRequiresMember: '只能由接入方主动确认，请让对方点击「确认连接」。',
+      downloadPlugin: '下载 / 安装本插件', downloadPluginHint: '对方设备先安装本插件，再使用邀请链接。',
       joinDifferent: '我去连别的设备', setupHint: '先选一种连接方式。',
       moreCard: '更多', snapshot: '离线快照', snapshotHint: '一个文件，带走当前同步内容',
       exportSnapshot: '导出', importSnapshot: '导入', snapshotText: '快照 JSON',
@@ -205,7 +268,7 @@ window.__ModuleLoader__.load({
       enable: '启用插件', disable: '停用插件', configSet: '写入插件配置',
       rules: '规则', excludeLabel: '不同步这些', localOnlyLabel: '只留在这台设备',
       noRules: '暂无规则', addRule: '添加', remove: '移除', rulePlaceholder: '插件名或 * 通配，回车添加',
-      noProtected: '系统插件始终不同步。',
+      noProtected: '系统插件始终不同步。', ruleBlocked: '已被规则拦截',
       heroTitle: '设备同步',
       heroHint: '先决定这台设备怎么连，再决定同步什么。改动点选即保存。',
       groupSetup: '一 · 先配好',
@@ -231,10 +294,11 @@ window.__ModuleLoader__.load({
       netPublic: '公网', netPublicDesc: 'HTTPS 地址加邀请链接，链接不要外传',
       lanHint: '局域网用 http://设备IP:3081（同步独立端口）。邀请链接是唯一凭据，请私下发送。',
       sshModeHint: 'SSH 用你的私钥作凭据，填好 SSH 主机、用户、密钥路径和端口（默认 22）。',
+      sshInviteModeHint: 'SSH 邀请会带上主机、用户和端口；本机不需要填写私钥。',
       publicHint: '公网请用 https:// 同步端口地址并带邀请链接，拿到链接的人就能连。',
       inviteLink: '邀请链接', inviteLinkHint: '粘贴对方发来的完整链接',
       parseLink: '解析链接', linkParsed: '链接已解析，连接前请先验证。',
-      verifyLink: '验证链接', verified: '已验证',
+      verifyLink: '验证链接', verified: '已验证', connect: '连接',
       'verify-failed': '链接或邀请码验证失败。',
       'ssh-client-not-found': '没找到系统 ssh 客户端，请安装 OpenSSH 并确保 ssh 在 PATH 中。',
       'pick-file-unavailable': '本机无法打开文件选择框，请直接填写私钥绝对路径。',
@@ -275,6 +339,8 @@ window.__ModuleLoader__.load({
 .ps-btn:disabled{opacity:.4;cursor:not-allowed}
 .ps-note{margin:8px 0 0;font-size:11.5px;color:var(--dsw-alias-label-tertiary,#8b9097);line-height:1.55}
 .ps-note.warn{color:var(--dsw-alias-state-warn-primary,#9a5b00)}
+.ps-link{color:var(--dsw-alias-state-business-primary,#2b6cff);text-decoration:none}
+.ps-link:hover{text-decoration:underline}
 .ps-split{display:flex;align-items:center;gap:10px;padding:8px 0;border-bottom:1px solid var(--dsw-alias-border-l1,#eef0f4);flex-wrap:wrap}
 .ps-split:last-child{border-bottom:0;padding-bottom:0}
 .ps-split .txt{flex:1;min-width:170px;font-size:12.5px}
@@ -365,10 +431,24 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
     const caps = ['install', 'upgrade', 'enable', 'disable', 'configSet', 'memoryWrite']
     const listFields = ['exclude', 'localOnly']
     const GUIDE_KEY = 'dsh-plugin-sync:guide-dismissed:v1'
+    const PROJECT_URL = 'https://github.com/coollcat/dsh-plugin-sync'
     const defaultConnection = () => ({
-      setup: null, preset: null, mode: 'lan', link: '', verified: false, host: '',
+      setup: null, preset: null, mode: 'lan', link: '', parsed: false, linkMissing: [], verified: false, host: '',
+      inviteSsh: { host: '', user: '', port: '22' },
       form: { kind: 'joinCenter', url: '', token: '', ssh: false, host: '', user: '', identityFile: '', port: '22', remotePort: '3081' },
     })
+    const SSH_HOST_RE = /^[A-Za-z0-9][A-Za-z0-9.-]{0,252}$/
+    const SSH_USER_RE = /^[A-Za-z_][A-Za-z0-9_.-]{0,63}$/
+    const validPort = (value) => Number.isInteger(Number(value)) && Number(value) >= 1 && Number(value) <= 65535
+    function validSshHost(value) {
+      const host = String(value ?? '').trim()
+      if (SSH_HOST_RE.test(host)) return true
+      if (!host.includes(':')) return false
+      try {
+        const parsed = new URL(`ssh://[${host}]/`)
+        return parsed.hostname.replace(/^\[|\]$/g, '').toLowerCase() === host.toLowerCase()
+      } catch { return false }
+    }
     function parseInviteLink(raw) {
       try {
         const text = String(raw ?? '').trim()
@@ -377,33 +457,68 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         const base = text.slice(0, question).replace(/\/plugin-sync\/join\/?$/, '')
         const query = {}
         for (const part of text.slice(question + 1).split('&')) {
-          const [name, value = ''] = part.split('=')
-          query[decodeURIComponent(name)] = decodeURIComponent(value)
+          const equal = part.indexOf('=')
+          const name = decodeURIComponent(equal < 0 ? part : part.slice(0, equal))
+          const value = decodeURIComponent(equal < 0 ? '' : part.slice(equal + 1))
+          query[name] = value
         }
         const token = query.invite || query.token
-        if (!base || !token) return null
+        if (!base || !token || !/^[A-Za-z0-9_-]{1,256}$/.test(token)) return null
         if (/^ssh:\/\//i.test(base)) {
-          const parsed = new URL(base)
-          const remotePort = Number(query.remote) >= 1 && Number(query.remote) <= 65535 ? query.remote : '3081'
-          const port = Number(query.port) >= 1 && Number(query.port) <= 65535 ? query.port : '22'
-          // Only carry what the link actually states. A link minted without a
-          // host (ssh:///...) leaves the host blank on purpose: the joiner types
-          // its own address instead of trusting a placeholder like "host".
+          const parsed = new URL(text)
+          if (parsed.hash || !/\/plugin-sync\/join\/?$/.test(parsed.pathname)) return null
+          const remotePort = validPort(query.remote) ? query.remote : '3081'
+          const port = validPort(query.port) ? query.port : validPort(parsed.port) ? parsed.port : '22'
+          // Missing fields are omitted, not returned as empty strings: parsing
+          // must never erase SSH values the user already typed.
           const stated = (value) => typeof value === 'string' && value && value.toLowerCase() !== 'host' ? value : ''
           const decoded = (value) => { try { return decodeURIComponent(value) } catch { return value } }
-          const host = stated(query.host) || stated(parsed.hostname)
+          const host = stated(query.host) || stated(parsed.hostname.replace(/^\[|\]$/g, ''))
           const user = stated(query.user) || stated(decoded(parsed.username))
           return {
             url: `http://127.0.0.1:${remotePort}`, token,
-            ssh: true, host, user, port, remotePort, hostMissing: !host,
+            ssh: true, port, remotePort, hostMissing: !host, userMissing: !user,
+            ...(host ? { host } : {}), ...(user ? { user } : {}),
           }
         }
         if (!/^https?:\/\//i.test(base)) return null
-        return { url: base, token, ssh: false }
+        const parsed = new URL(text)
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash || !/\/plugin-sync\/join\/?$/.test(parsed.pathname)) return null
+        return {
+          url: base, token, ssh: false, public: parsed.protocol === 'https:',
+          remotePort: parsed.port || (parsed.protocol === 'https:' ? '443' : '80'),
+        }
       } catch { return null }
     }
-    function originHint() {
-      try { return typeof location !== 'undefined' && location.origin ? location.origin : '' } catch { return '' }
+    function applyInviteLink(prior, raw, parsed) {
+      const { hostMissing, userMissing, public: isPublic, ...fields } = parsed
+      const missing = parsed.ssh
+        ? [hostMissing ? 'sshHost' : null, userMissing ? 'sshUser' : null].filter(Boolean)
+        : []
+      return {
+        ...prior, link: raw, parsed: true, linkMissing: missing, verified: false,
+        mode: parsed.ssh ? 'ssh' : parsed.public ? 'public' : 'lan',
+        form: { ...prior.form, ...fields },
+      }
+    }
+    function directInviteAddress(raw, mode, syncPort) {
+      const text = String(raw ?? '').trim()
+      if (!text) return { url: '', error: 'inviteAddressRequired' }
+      const withScheme = /^[A-Za-z][A-Za-z0-9+.-]*:\/\//.test(text) ? text : `${mode === 'public' ? 'https://' : 'http://'}${text}`
+      try {
+        const parsed = new URL(withScheme)
+        if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash || /\/plugin-sync\/join\/?$/.test(parsed.pathname)) {
+          return { url: '', error: 'inviteAddressInvalid' }
+        }
+        if (mode === 'public' && parsed.protocol !== 'https:') return { url: '', error: 'inviteHttpsRequired' }
+        const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]+)/.exec(withScheme)?.[1] ?? ''
+        if (!parsed.port && !/:\d+$/.test(authority)) parsed.port = String(syncPort)
+        const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
+        return {
+          url: parsed.href.replace(/\/$/, ''),
+          loopback: ['localhost', '127.0.0.1', '::1'].includes(hostname),
+        }
+      } catch { return { url: '', error: 'inviteAddressInvalid' } }
     }
     function guideDismissed() {
       try { return typeof localStorage !== 'undefined' && localStorage.getItem(GUIDE_KEY) === '1' } catch { return false }
@@ -425,7 +540,13 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       return String(template).replace(/\{(\w+)\}/g, (_, key) => Object.hasOwn(values ?? {}, key) ? String(values[key]) : `{${key}}`)
     }
     const safeLabels = new Set(Object.keys(zh))
-    const statusText = (t, code, fallback = 'failed') => t(safeLabels.has(code) ? code : fallback)
+    // An unknown code is still a closed host code. Dropping it turned every
+    // host failure into one indistinguishable sentence with nothing to search.
+    const inlineCode = (t, code, fallback) => fmt(t('withCode'), { text: t(fallback), code })
+    const statusText = (t, code, fallback = 'failed') => {
+      if (safeLabels.has(code)) return t(code)
+      return typeof code === 'string' && /^[a-z0-9][a-z0-9:-]{0,63}$/.test(code) ? inlineCode(t, code, fallback) : t(fallback)
+    }
     function normalizeCode(code) {
       if (typeof code !== 'string') return null
       if (code.startsWith('direction-blocked:')) return 'direction-blocked'
@@ -549,7 +670,13 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           setBusy(null)
         }
       }
-      return { state, inventory, load, busy, feedback, refresh, readInventory, run }
+      const clearFeedback = useCallback((area) => setFeedback((prior) => {
+        if (!Object.hasOwn(prior, area)) return prior
+        const next = { ...prior }
+        delete next[area]
+        return next
+      }), [])
+      return { state, inventory, load, busy, feedback, refresh, readInventory, run, clearFeedback }
     }
 
     const row = (...children) => h('div', { className: 'ps-row' }, ...children)
@@ -676,9 +803,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const { state } = ctl
       const role = state.identity.role
       const paired = role !== 'unpaired'
-      const peer = Object.values(state.peers ?? {})[0]
-      const contact = state.center ?? peer
-      const connected = Boolean(contact?.lastContact)
+      const contacts = [state.center, ...Object.values(state.peers ?? {})].filter(Boolean)
+      const connected = contacts.some((contact) => Boolean(contact.lastSeen))
       return h('div', { className: 'ps-row', style: { fontSize: 13 } },
         h('strong', {}, state.identity.label),
         h(Badge, {}, t(role)),
@@ -929,6 +1055,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         }
         update({ configFields, configIncluded: [...included], caps: { ...draft.caps, configSet: included.size > 0 } }, true)
       }
+      const matchesRule = (patterns, key) => lines(patterns).some((pattern) => pattern === key || (pattern.endsWith('*') && key.startsWith(pattern.slice(0, -1))))
+      const blockingRule = (key) => matchesRule(draft.localOnly, key) ? 'localOnlyLabel' : matchesRule(draft.exclude, key) ? 'excludeLabel' : null
       return h(Card, { title: t('scope'), hint: t('scopeHint'), actions: saving ? h('span', { className: 'hint' }, t('busy')) : null },
         h('div', { className: 'ps-row', style: { marginBottom: 10 } },
           h('label', { className: 'ps-field' }, h('span', {}, t('direction')),
@@ -944,9 +1072,11 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         h('ul', { className: 'ps-list' },
           shown.map((item) => {
             const found = configsFor(item.key)
+            const blocked = selected.includes(item.key) ? blockingRule(item.key) : null
             return h('li', { key: item.key },
               h('input', { type: 'checkbox', checked: selected.includes(item.key), disabled, onChange: (event) => setSelected(event.target.checked ? [...selected, item.key] : selected.filter((key) => key !== item.key)) }),
               h('span', { className: 'name' }, item.key, !item.enabled && h('small', {}, t('disable'))),
+              blocked && h(Badge, { tone: 'warn' }, `${t('ruleBlocked')}: ${t(blocked)}`),
               found.length > 0 && h('label', { className: 'ps-plugin-settings', title: t('syncSettingsHint') },
                 h('input', { type: 'checkbox', checked: settingsOn(item.key), disabled, onChange: (event) => toggleSettings(item.key, event.target.checked) }),
                 t('syncSettings')))
@@ -968,6 +1098,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             h(RuleList, { t, label: t('localOnlyLabel'), values: lines(draft.localOnly), options: all.map((item) => item.key), disabled,
               onAdd: (value) => update({ localOnly: [...new Set([...lines(draft.localOnly), value])].join('\n') }, true),
               onRemove: (value) => update({ localOnly: lines(draft.localOnly).filter((item) => item !== value).join('\n') }, true) }))),
+          note(t('rulesOverride')),
         all.length > 0 && selected.length === 0 && note(t('noneWarn'), 'warn'),
         h('div', { className: 'ps-row', style: { marginTop: 12 } },
           h(Button, { quiet: true, onClick: importJson, disabled }, t('importJson')),
@@ -1064,55 +1195,112 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             .map((kind) => h(Plan, { key: kind.key, ctl, t, kind }))))
     }
 
+    function SshFields({ t, values, onChange, disabled, identity = false, onPick }) {
+      const field = (key, label, placeholder) => h('label', { key, className: 'ps-field', style: { flex: '1 1 150px' } },
+        h('span', {}, label),
+        h('input', {
+          className: 'ps-input', value: values[key] ?? '', placeholder, disabled, autoComplete: 'off', spellCheck: false,
+          onChange: (event) => onChange({ ...values, [key]: event.target.value }),
+        }))
+      return h('div', {},
+        h('div', { className: 'ps-row' },
+          field('host', t('sshHost'), t('sshHostPlaceholder')),
+          field('user', t('sshUser'), t('sshUserPlaceholder')),
+          field('port', t('sshPort'), t('sshPortPlaceholder'))),
+        identity && h('label', { className: 'ps-field', style: { marginTop: 8, flex: '1 1 240px' } }, h('span', {}, t('sshIdentity')),
+          h('div', { className: 'ps-row' },
+            h('input', {
+              className: 'ps-input', style: { flex: 1 }, value: values.identityFile ?? '', placeholder: t('sshIdentityPlaceholder'),
+              disabled, autoComplete: 'off', spellCheck: false,
+              onChange: (event) => onChange({ ...values, identityFile: event.target.value }),
+            }),
+            h(Button, { quiet: true, disabled, onClick: onPick }, t('pickFile')))))
+    }
+
     function Connections({ ctl, t, connection, setConnection, onReopen, onReset }) {
       const { state } = ctl
       const syncPort = state.syncPort ?? 3081
+      const syncHost = String(state.syncHost ?? '')
+      const listenerLoopback = ['127.0.0.1', 'localhost', '::1', '[::1]'].includes(syncHost)
       const role = state.identity.role
       const paired = role !== 'unpaired'
-      const host = role === 'center' || (role === 'peer' && !state.center)
+      const isHost = role === 'center' || (role === 'peer' && !state.center)
       const [invite, setInvite] = useState(null)
       const [confirmReset, setConfirmReset] = useState(false)
-      const { setup, form, preset, mode, link, verified } = connection
+      const { setup, form, preset, mode, link, parsed, linkMissing, verified } = connection
+      const inviteSsh = connection.inviteSsh ?? { host: '', user: '', port: '22' }
       const patch = (values) => setConnection((prior) => ({ ...prior, ...values }))
-      const setSetup = (value) => patch({ setup: value })
-      const setForm = (value) => patch({ form: value, verified: false })
-      const setMode = (next) => setConnection((prior) => {
-        const updated = { ...prior.form }
-        if (next === 'ssh') { updated.ssh = true; updated.url = `http://127.0.0.1:${syncPort}` }
-        else {
-          updated.ssh = false
-          if (updated.url === `http://127.0.0.1:${syncPort}`) updated.url = ''
-        }
-        return { ...prior, mode: next, verified: false, form: updated }
-      })
+      const setForm = (value) => { ctl.clearFeedback('verify'); patch({ form: value, verified: false }) }
+      const setSetup = (value) => {
+        ctl.clearFeedback('verify')
+        setConnection((prior) => {
+          if (value !== 'join') return { ...prior, setup: value, verified: false }
+          const nextForm = { ...prior.form, ssh: prior.mode === 'ssh' }
+          if (nextForm.ssh) nextForm.url = `http://127.0.0.1:${syncPort}`
+          return { ...prior, setup: value, verified: false, form: nextForm }
+        })
+      }
+      const setMode = (next) => {
+        ctl.clearFeedback('verify')
+        ctl.clearFeedback('connection')
+        setInvite(null)
+        setConnection((prior) => {
+          const updated = { ...prior, mode: next, verified: false }
+          if (prior.setup === 'join') {
+            const nextForm = { ...prior.form, ssh: next === 'ssh' }
+            if (nextForm.ssh) {
+              try {
+                const endpoint = new URL(prior.form.url)
+                nextForm.remotePort = endpoint.port || (endpoint.protocol === 'https:' ? '443' : '80')
+              } catch { /* Keep the last known remote port for an incomplete address. */ }
+              nextForm.url = `http://127.0.0.1:${nextForm.remotePort || syncPort}`
+            } else if (nextForm.url === `http://127.0.0.1:${syncPort}` || nextForm.url === `http://127.0.0.1:${nextForm.remotePort}`) nextForm.url = ''
+            updated.form = nextForm
+          }
+          return updated
+        })
+      }
+      const setInviteSsh = (value) => { ctl.clearFeedback('connection'); setInvite(null); patch({ inviteSsh: value }) }
+      const setHostAddress = (value) => { ctl.clearFeedback('connection'); setInvite(null); patch({ host: value }) }
       const peers = Object.values(state.peers ?? {})
       const peerLimit = role === 'peer' && (Boolean(state.center) || peers.some((peer) => peer.status === 'connected'))
       const disabled = Boolean(ctl.busy)
       const sshArgs = () => form.ssh ? { kind: 'ssh', host: form.host.trim(), user: form.user.trim(), identityFile: form.identityFile.trim(), port: Number(form.port) || 22, remotePort: Number(form.remotePort) || syncPort } : undefined
-      // An SSH link carries no address of its own; the joiner must state it.
-      const sshHostReady = !form.ssh || Boolean(form.host.trim())
+      const sshHostValid = validSshHost(form.host)
+      const sshUserValid = SSH_USER_RE.test(form.user.trim())
+      const sshPortValid = validPort(form.port)
+      const sshReady = !form.ssh || (sshHostValid && sshUserValid && sshPortValid && Boolean(form.identityFile.trim()))
+      const sshInviteReady = validSshHost(inviteSsh.host) && SSH_USER_RE.test(inviteSsh.user.trim()) && validPort(inviteSsh.port)
+      const directInvite = directInviteAddress(connection.host, mode, syncPort)
+      const inviteReady = mode === 'ssh' ? sshInviteReady : Boolean(directInvite.url)
+      const hostSide = isHost || (!paired && ['center', 'peer'].includes(setup))
       const createInvite = () => ctl.run('connection', async () => {
+        if (!inviteReady) throw { code: mode === 'ssh' ? 'sshHostInvalid' : directInvite.error ?? 'inviteAddressRequired' }
         const value = await call('invite')
         if (typeof value?.token !== 'string' || !value.token) throw { code: 'bad-response' }
         setInvite(value)
-      }, { reload: false })
+      }, { reload: false, success: 'inviteCreated' })
       const pair = (topology) => ctl.run('connection', async () => {
         await call('pairCenter', { topology, initSource: 'local', label: state.identity.label })
       }, { success: 'done' })
-      const useLink = () => ctl.run('link', async () => {
-        const parsed = parseInviteLink(link)
-        if (!parsed) throw { code: 'invalid-invitation' }
-        const { hostMissing, ...fields } = parsed
-        patch({ link, verified: false, hostMissing: Boolean(hostMissing), mode: parsed.ssh ? 'ssh' : 'lan', form: { ...form, ...fields } })
-      }, { reload: false, success: 'linkParsed' })
+      const updateLink = (raw) => {
+        ctl.clearFeedback('verify')
+        setConnection((prior) => {
+          const next = parseInviteLink(raw)
+          return next ? applyInviteLink(prior, raw, next) : { ...prior, link: raw, parsed: false, linkMissing: [], verified: false }
+        })
+      }
       const verify = () => ctl.run('verify', async () => {
         const value = await call('verify', { url: form.url.trim(), token: form.token.trim(), ssh: sshArgs() })
         if (!value?.verified) throw { code: 'verify-failed' }
-        patch({ verified: true })
+        setConnection((prior) => ({
+          ...prior, verified: true,
+          form: { ...prior.form, kind: value.topology === 'p2p' ? 'connectPeer' : 'joinCenter' },
+        }))
       }, { reload: false, success: 'verified' })
       const join = () => ctl.run('connection', async () => {
         await call(form.kind, { url: form.url.trim(), token: form.token.trim(), ssh: sshArgs() })
-      }, { success: 'done' })
+      }, { success: 'connected' })
       const reset = () => ctl.run('connection', async () => {
         await call('reset')
         setInvite(null)
@@ -1120,36 +1308,27 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         if (onReset) onReset()
       }, { success: 'resetDone' })
       const inviteLink = () => {
-        if (!invite?.token) return ''
+        if (!invite?.token || !inviteReady) return ''
         const token = encodeURIComponent(invite.token)
         if (mode === 'ssh') {
-          const user = form.user.trim()
-          const host = form.host.trim()
-          const remotePort = Number(form.remotePort) >= 1 && Number(form.remotePort) <= 65535 ? Number(form.remotePort) : syncPort
-          const sshPort = Number(form.port) >= 1 && Number(form.port) <= 65535 ? Number(form.port) : 22
-          const query = `invite=${token}&remote=${remotePort}&port=${sshPort}`
-          // Never mint a placeholder host: an unknown host becomes an empty
-          // authority (ssh:///...) plus explicit user/host params, so the joiner
-          // fills its own address and nothing invented ever reaches ssh -W.
-          if (!host) return `ssh:///plugin-sync/join?${query}${user ? `&user=${encodeURIComponent(user)}` : ''}`
-          // Same shape the transport accepts; a host it would reject must not
-          // reach a link that silently fails on the other side.
-          if (!/^[A-Za-z0-9][A-Za-z0-9.:-]{0,252}$/.test(host)) return ''
-          return `ssh://${user ? `${encodeURIComponent(user)}@` : ''}${host}/plugin-sync/join?${query}`
+          const user = inviteSsh.user.trim()
+          const host = inviteSsh.host.trim()
+          const sshPort = validPort(inviteSsh.port) ? Number(inviteSsh.port) : 22
+          const authorityHost = host.includes(':') && !host.startsWith('[') ? `[${host}]` : host
+          return `ssh://${encodeURIComponent(user)}@${authorityHost}/plugin-sync/join?invite=${token}&remote=${syncPort}&port=${sshPort}`
         }
-        const raw = (connection.host || originHint() || `http://127.0.0.1:${syncPort}`).replace(/\/$/, '')
-        const withScheme = /^https?:\/\//i.test(raw) ? raw : `${mode === 'public' ? 'https://' : 'http://'}${raw}`
-        const base = withScheme.replace(/^(https?:\/\/(?:\[[^\]]+\]|[^/?#:]+))(?:\:\d+)?/, `$1:${syncPort}`)
-        return `${base.replace(/\/$/, '')}/plugin-sync/join?invite=${token}`
+        return `${directInvite.url}/plugin-sync/join?invite=${token}`
       }
       const pickFile = () => ctl.run('pickFile', async () => {
         const value = await call('pickFile')
         if (value?.path) setForm({ ...form, identityFile: value.path })
-      }, { reload: false, success: 'done' })
+      }, { reload: false, success: 'keySelected' })
       const copyLink = () => ctl.run('copy', async () => {
         try {
+          const value = inviteLink()
+          if (!value) throw { code: 'copy-failed' }
           if (typeof navigator === 'undefined' || !navigator.clipboard) throw { code: 'copy-failed' }
-          await navigator.clipboard.writeText(inviteLink())
+          await navigator.clipboard.writeText(value)
         } catch { throw { code: 'copy-failed' } }
       }, { reload: false, success: 'copied' })
       const actions = confirmReset
@@ -1166,68 +1345,102 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             action: t(preset.action === 'create' ? 'actionCreateShort' : 'actionJoinShort'),
             hint: t(preset.action === 'create' ? 'presetCreateHint' : 'presetJoinHint'),
           }))),
-        h('div', { className: 'ps-net-modes', role: 'group' },
+        !(paired && !isHost) && h('div', { className: 'ps-net-modes', role: 'group' },
           [['lan', 'netLan'], ['ssh', 'netSsh'], ['public', 'netPublic']].map(([value, label]) =>
             h(Button, { key: value, primary: mode === value, onClick: () => setMode(value) }, t(label)))),
-        note(t(mode === 'lan' ? 'lanHint' : mode === 'ssh' ? 'sshModeHint' : 'publicHint'), mode === 'public' ? 'warn' : undefined),
+        !(paired && !isHost) && note(t(mode === 'lan' ? 'lanHint' : mode === 'ssh' ? hostSide ? 'sshInviteModeHint' : 'sshModeHint' : 'publicHint'), mode === 'public' ? 'warn' : undefined),
+        paired && !isHost && h('div', { className: 'ps-row' },
+          h(Badge, {}, t(state.center?.transport?.kind === 'ssh' ? 'netSsh' : state.center?.url?.startsWith('https:') ? 'netPublic' : 'netLan')),
+          h('span', { className: 'hint' }, t('connectionsHint'))),
         !paired && h('div', {},
           note(t('setupHint')),
           row(h(Button, { primary: setup === 'center', onClick: () => pair('center') }, t('createCenter')),
             h(Button, { primary: setup === 'peer', onClick: () => pair('p2p') }, t('listenPeer')),
-            h(Button, { primary: setup === 'join', onClick: () => setSetup(setup === 'join' ? null : 'join') }, t('joinCenter')))),
+            h(Button, { primary: setup === 'join', onClick: () => setSetup(setup === 'join' ? null : 'join') }, t('joinCenter'))),
+          h('p', { className: 'ps-note' },
+            h('a', { className: 'ps-link', href: PROJECT_URL, target: '_blank', rel: 'noreferrer' }, t('downloadPlugin')),
+            ' · ', t('downloadPluginHint'))),
         !paired && setup === 'join' && h('div', { style: { marginTop: 10 } },
+          note(t('joinSteps')),
           h('label', { className: 'ps-field' }, h('span', {}, t('inviteLink')),
-            h('div', { className: 'ps-row' },
-              h('input', { className: 'ps-input', value: link, placeholder: t('inviteLinkHint'), onChange: (event) => patch({ link: event.target.value, verified: false }) }),
-              h(Button, { disabled: disabled || !link.trim(), onClick: useLink }, t('parseLink')))),
-          h('div', { className: 'ps-row', style: { marginTop: 8 } },
-            h('label', { className: 'ps-field', style: { flex: '1 1 200px' } }, h('span', {}, t('joinKind')),
-              h('select', { className: 'ps-input', value: form.kind, onChange: (event) => setForm({ ...form, kind: event.target.value }) },
-                h('option', { value: 'joinCenter' }, t('center')), h('option', { value: 'connectPeer' }, t('peer')))),
-            h('label', { className: 'ps-field', style: { flex: '1 1 240px' } }, h('span', {}, t('joinUrl')),
-              h('input', { className: 'ps-input', value: form.url, onChange: (event) => setForm({ ...form, url: event.target.value }), placeholder: mode === 'public' ? `https://sync.example.com:${syncPort}` : `http://192.0.2.10:${syncPort}` }))),
+            h('input', {
+              className: 'ps-input', value: link, placeholder: t('inviteLinkHint'), disabled, autoComplete: 'off', spellCheck: false,
+              onChange: (event) => updateLink(event.target.value),
+            })),
+          h('div', { className: 'ps-row', style: { marginTop: 6 } },
+            parsed && h(Badge, { tone: 'ok' }, t('linkParsed')),
+            link.trim() && !parsed && note(t('invalid-invitation'), 'warn')),
+          linkMissing.length > 0 && note(fmt(t('linkMissingSsh'), { fields: linkMissing.map((key) => t(key)).join(' / ') })),
+          !form.ssh && h('label', { className: 'ps-field', style: { marginTop: 8, flex: '1 1 240px' } }, h('span', {}, t('joinUrl')),
+            h('input', {
+              className: 'ps-input', value: form.url, disabled, placeholder: mode === 'public' ? `https://sync.example.com:${syncPort}` : `http://192.0.2.10:${syncPort}`,
+              onChange: (event) => setForm({ ...form, url: event.target.value }),
+            })),
           h('details', { style: { marginTop: 8 }, open: mode === 'ssh' }, h('summary', { style: { fontSize: 12, cursor: 'pointer' } }, t('ssh')),
-            h('div', { className: 'ps-row', style: { marginTop: 8 } },
-              h('label', { className: 'ps-check' }, h('input', { type: 'checkbox', checked: form.ssh, onChange: (event) => setForm({ ...form, ssh: event.target.checked }) }), t('ssh')),
-              ['host', 'user', 'port'].map((key) => h('label', { key, className: 'ps-field', style: { flex: '1 1 150px' } },
-                h('span', {}, t(key === 'host' ? 'sshHost' : key === 'user' ? 'sshUser' : 'sshPort')),
-                h('input', { className: 'ps-input', value: form[key], disabled: !form.ssh, onChange: (event) => setForm({ ...form, [key]: event.target.value }) }))),
-              h('label', { className: 'ps-field', style: { flex: '1 1 240px' } }, h('span', {}, t('sshIdentity')),
-                h('div', { className: 'ps-row' },
-                  h('input', { className: 'ps-input', style: { flex: 1 }, value: form.identityFile, disabled: !form.ssh, onChange: (event) => setForm({ ...form, identityFile: event.target.value }) }),
-                  h(Button, { quiet: true, disabled: disabled || !form.ssh, onClick: pickFile }, t('pickFile'))))),
-            form.ssh && !form.host.trim() && note(t('sshHostRequired'), 'warn'),
-            note(t('sshHint'))),
+            h('div', { style: { marginTop: 8 } },
+              h('label', { className: 'ps-check' }, h('input', { type: 'checkbox', checked: form.ssh, disabled, onChange: (event) => setMode(event.target.checked ? 'ssh' : 'lan') }), t('ssh')),
+              form.ssh && h('div', { style: { marginTop: 8 } },
+                h(SshFields, { t, values: form, disabled, identity: true, onChange: setForm, onPick: pickFile }),
+                note(fmt(t('sshTargetHint'), { port: form.remotePort || syncPort })),
+                form.ssh && !form.host.trim() && note(t('sshHostRequired'), 'warn'),
+                form.ssh && form.host.trim() && !sshHostValid && note(t('sshHostInvalid'), 'warn'),
+                form.ssh && !form.user.trim() && note(t('sshUserRequired'), 'warn'),
+                form.ssh && form.user.trim() && !sshUserValid && note(t('sshUserInvalid'), 'warn'),
+                form.ssh && !sshPortValid && note(t('sshPortInvalid'), 'warn'),
+                form.ssh && !form.identityFile.trim() && note(t('sshIdentityRequired'), 'warn')),
+              note(t('sshHint')))),
           h('div', { className: 'ps-row', style: { marginTop: 10 } },
-            h(Button, { disabled: disabled || !form.url.trim() || !form.token.trim() || !sshHostReady, onClick: verify }, t('verifyLink')),
+            h(Button, { disabled: disabled || !parsed || !form.url.trim() || !form.token.trim() || !sshReady, onClick: verify }, t('verifyLink')),
             verified && h(Badge, { tone: 'ok' }, t('verified')),
-            h(Button, { primary: true, disabled: disabled || !verified || !form.url.trim() || !form.token.trim() || !sshHostReady, onClick: join }, t('joinCenter'))),
-          h(Feedback, { area: 'link', ctl, t }),
+            h(Button, { primary: true, disabled: disabled || !verified || !parsed || !form.url.trim() || !form.token.trim() || !sshReady, onClick: join }, t('connect'))),
           h(Feedback, { area: 'pickFile', ctl, t }),
           h(Feedback, { area: 'verify', ctl, t })),
+        paired && !isHost && state.center && h('div', { className: 'ps-row', style: { marginTop: 10 } },
+          h(Button, { quiet: true, disabled, onClick: act(ctl, 'connection', 'confirmConnection', {}, { success: 'connectionConfirmed' }) }, t('confirmConnection'))),
         paired && h('div', {},
           peers.length === 0 && !state.center ? note(t('noPeers')) : h('ul', { className: 'ps-list' },
             state.center && h('li', {},
               h('span', { className: 'name' }, state.center.label ?? t('center'),
-                h('small', {}, state.center.lastContact ? `${t('lastContact')} ${state.center.lastContact}` : t('unconfirmed'))),
-              h(Badge, { tone: state.center.lastContact ? 'ok' : '' }, t(state.center.lastContact ? 'online' : 'unconfirmed'))),
-            peers.map((peer) => h('li', { key: peer.deviceId },
-              h('span', { className: 'name' }, peer.label ?? peer.deviceId.slice(0, 12),
-                h('small', {}, [peer.profileId, peer.lastContact].filter(Boolean).join(' · '))),
-              h(Badge, { tone: peer.status === 'connected' ? 'ok' : '' }, t(peer.status === 'revoked' ? 'revoked' : peer.status === 'connected' ? 'online' : 'offlineState')),
-              host && peer.status !== 'revoked' && h(Button, { quiet: true, disabled: Boolean(ctl.busy), onClick: act(ctl, 'connection', 'revokePeer', { deviceId: peer.deviceId }, { success: 'revoked' }) }, t('revoke'))))),
-          host && h('div', { style: { marginTop: 10 } },
-            h('div', { className: 'ps-row' },
-              h(Button, { disabled: disabled || peerLimit, onClick: createInvite }, t('invite')),
-              invite && h(Button, { quiet: true, onClick: () => setInvite(null) }, t('hideInvite'))),
+                h('small', {}, state.center.lastSeen ? `${t('lastContact')} ${state.center.lastSeen}` : t('unconfirmed'))),
+              h(Badge, { tone: state.center.lastSeen ? 'ok' : '' }, t(state.center.lastSeen ? 'online' : 'unconfirmed'))),
+            peers.map((peer) => {
+              const seen = Boolean(peer.lastSeen)
+              return h('li', { key: peer.deviceId },
+                h('span', { className: 'name' }, peer.label ?? peer.deviceId.slice(0, 12),
+                  h('small', {}, [peer.profileId, peer.lastSeen].filter(Boolean).join(' · '))),
+                h(Badge, { tone: seen ? 'ok' : '' }, t(peer.status === 'revoked' ? 'revoked' : seen ? 'online' : 'unconfirmed')),
+                isHost && peer.status !== 'revoked' && h(Button, { quiet: true, disabled: Boolean(ctl.busy), onClick: act(ctl, 'connection', 'revokePeer', { deviceId: peer.deviceId }, { success: 'revoked' }) }, t('revoke')))
+            })),
+          isHost && h('div', { style: { marginTop: 10 } },
+            h('p', { className: 'ps-note' },
+              h('a', { className: 'ps-link', href: PROJECT_URL, target: '_blank', rel: 'noreferrer' }, t('downloadPlugin')),
+              ' · ', t('downloadPluginHint')),
+            h('div', { className: 'ps-sub' }, t('inviteSettings')),
+            mode === 'ssh' ? h('div', {},
+              h(SshFields, { t, values: inviteSsh, disabled, onChange: setInviteSsh }),
+              note(t('sshInviteHint')),
+              !inviteSsh.host.trim() && note(t('sshInviteHostRequired'), 'warn'),
+              inviteSsh.host.trim() && !validSshHost(inviteSsh.host) && note(t('sshHostInvalid'), 'warn'),
+              !inviteSsh.user.trim() && note(t('sshInviteUserRequired'), 'warn'),
+              inviteSsh.user.trim() && !SSH_USER_RE.test(inviteSsh.user.trim()) && note(t('sshUserInvalid'), 'warn'),
+              !validPort(inviteSsh.port) && note(t('sshPortInvalid'), 'warn')) : h('div', {},
+              h('label', { className: 'ps-field' }, h('span', {}, t('inviteAddress')),
+                h('input', {
+                  className: 'ps-input', value: connection.host ?? '', disabled, autoComplete: 'off', spellCheck: false,
+                  placeholder: mode === 'public' ? `https://sync.example.com:${syncPort}` : `http://192.0.2.10:${syncPort}`,
+                  onChange: (event) => setHostAddress(event.target.value),
+                })),
+              directInvite.error && note(t(directInvite.error), 'warn'),
+              directInvite.loopback && note(t('inviteLoopbackWarn'), 'warn'),
+              listenerLoopback && note(t('inviteListenerLoopbackWarn'), 'warn')),
+            h('div', { className: 'ps-row', style: { marginTop: 8 } },
+              h(Button, { primary: true, disabled: disabled || peerLimit || !inviteReady, onClick: createInvite }, t('invite')),
+              invite && h(Button, { quiet: true, onClick: () => { ctl.clearFeedback('connection'); setInvite(null) } }, t('hideInvite'))),
             invite && h('div', { style: { marginTop: 8 } },
-              h('label', { className: 'ps-field' }, h('span', {}, t('hostAddress')),
-                h('input', { className: 'ps-input', value: connection.host || originHint(), placeholder: `http://192.0.2.10:${syncPort}`, onChange: (event) => patch({ host: event.target.value }) })),
-              h('label', { className: 'ps-field', style: { marginTop: 8 } }, h('span', {}, t('inviteLink')),
+              h('label', { className: 'ps-field' }, h('span', {}, t('inviteLink')),
                 h('code', { className: 'ps-mono ps-code' }, inviteLink())),
-              mode === 'ssh' && !inviteLink() && note(t('sshHostInvalid'), 'warn'),
               h('div', { className: 'ps-row', style: { marginTop: 8 } },
-                h(Button, { quiet: true, disabled, onClick: copyLink }, t('copyLink'))),
+                h(Button, { quiet: true, disabled: disabled || !inviteLink(), onClick: copyLink }, t('copyLink'))),
               note(`${t('inviteExpires')} ${invite.expiresAt ?? '—'}`)),
             peerLimit && note(t('peerLimit')),
             note(t('secureHint')))),
@@ -1293,6 +1506,34 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           h(Feedback, { area: 'policy', ctl, t })))
     }
 
+    // Startup failures are shown, not swallowed: the panel used to look healthy
+    // while the sync listener had never bound its port.
+    function ListenerAlert({ state, t }) {
+      const listener = state?.listener
+      if (!listener) return null
+      // The port moved aside because another instance holds it: nothing is
+      // broken, but every invitation must carry the port this one really uses.
+      if (listener.status !== 'error' && listener.fallback) {
+        return h('div', { className: 'ps-card', role: 'status' },
+          h('div', { className: 'ps-hd' },
+            h('h3', {}, t('settings')),
+            h('span', { className: 'hint' }, `${listener.host}:${listener.port}`)),
+          note(fmt(t('listenerMoved'), { configured: listener.configuredPort, port: listener.port }), 'warn'))
+      }
+      if (listener.status !== 'error') return null
+      const detail = ['port-in-use', 'port-forbidden'].includes(listener.error)
+        ? fmt(t(listener.error), { port: listener.port })
+        : ['address-unavailable'].includes(listener.error)
+          ? fmt(t(listener.error), { host: listener.host })
+          : t('listen-failed')
+      return h('div', { className: 'ps-card', role: 'alert', style: { borderColor: 'var(--dsw-alias-state-warn-primary,#9a5b00)' } },
+        h('div', { className: 'ps-hd' },
+          h('h3', { style: { color: 'var(--dsw-alias-state-warn-primary,#9a5b00)' } }, t('listenerDown')),
+          h('span', { className: 'hint' }, `${listener.host}:${listener.port}`)),
+        note(detail, 'warn'),
+        note([t('listenerRetry'), listener.error].join(' ')))
+    }
+
     function SyncTab({ t }) {
       const ctl = useController()
       const draftCtl = useDraft(ctl)
@@ -1316,7 +1557,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             url: network === 'ssh' ? `http://127.0.0.1:${state.syncPort ?? 3081}` : prior.form.url,
           }
           return {
-            ...prior, preset, mode: network, verified: false, form,
+            ...prior, preset, mode: network, parsed: false, linkMissing: [], verified: false, form,
             setup: preset.action === 'join' ? 'join' : preset.mode === 'center' ? 'center' : 'peer',
           }
         })
@@ -1334,6 +1575,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         h('header', { className: 'ps-hero' },
           h('div', { className: 'ps-intro' }, h('h2', {}, t('heroTitle')), h('p', {}, t('heroHint'))),
           h(Status, { ctl, t })),
+        h(ListenerAlert, { state, t }),
         !paired && guideOpen && h(Guide, { t, onApply: applyPreset, onSkip: skipGuide }),
         h('div', { className: 'ps-grid' },
           h('div', { className: 'ps-col' },

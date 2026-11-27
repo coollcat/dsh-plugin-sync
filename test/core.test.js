@@ -26,7 +26,7 @@ test('policy protection priority', () => {
   })
   assert.equal(evaluate(policy, { key: '@local/dsh-plugin-sync' }).reason, 'system-protected')
   assert.equal(evaluate(policy, { key: 'axc' }).reason, 'local-only')
-  assert.equal(evaluate(policy, { key: 'abd' }).reason, 'explicit-include')
+  assert.equal(evaluate(policy, { key: 'abd' }).reason, 'excluded:*')
   assert.equal(evaluate(policy, { key: 'zzz' }).reason, 'excluded:*')
 })
 

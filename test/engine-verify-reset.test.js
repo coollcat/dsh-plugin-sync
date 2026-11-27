@@ -122,6 +122,27 @@ test('hello verify still enforces every pairing precondition before answering', 
   assert.equal(center.handleHello({ token: second.token, identity, verify: true }).error, 'device-already-paired')
 })
 
+test('the member can explicitly confirm a paired connection without creating a plan', async () => {
+  const center = await pairedCenter()
+  const invite = center.createInvitation()
+  const device = createEngine({
+    store: memoryStore(),
+    adapters: adapters({ profileId: 'device-p', label: 'Device' }),
+    transport: link(center),
+    deviceId: 'confirm-device',
+  })
+  await device.joinCenter({ url: ENDPOINT, token: invite.token })
+  const before = device.publicState().lastPlan
+  const confirmed = await device.confirmConnection()
+  assert.equal(confirmed.status, 'ok')
+  assert.equal(confirmed.label, 'Center')
+  assert.ok(confirmed.lastSeen)
+  assert.equal(device.publicState().center.status, 'connected')
+  assert.equal(device.publicState().lastPlan, before)
+  assert.ok(center.publicState().peers['confirm-device'].lastSeen)
+  assert.deepEqual(await center.confirmConnection(), { ok: false, reason: 'confirmation-requires-member' })
+})
+
 test('resetSync clears link, peers, invitations and credentials, then allows a different topology', async () => {
   const centerSecrets = {}
   const centerDeleted = []

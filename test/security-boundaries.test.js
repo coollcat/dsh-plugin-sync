@@ -46,6 +46,8 @@ const plugin=()=>{const record={kind:'plugin',key:'example-plugin',enabled:false
   await assert.rejects(transport.send('http://127.0.0.1/state',{token:'fake-token'}),error=>error.code==='unauthorized');assert.equal(options.redirect,'error')
   // Plain HTTP to a non-loopback host is allowed for LAN pairing; the bearer token is the credential.
   await assert.rejects(transport.send('http://203.0.113.1/state',{token:'fake-token'}),error=>error.code==='unauthorized')
+  const denied=createTransport({fetchImpl:async()=>({ok:false,status:401,headers:new Headers(),text:async()=>JSON.stringify({error:'invalid-invitation'})})})
+  await assert.rejects(denied.send('http://127.0.0.1/state',{token:'fake-token'}),error=>error.code==='invalid-invitation')
   await assert.rejects(transport.send('https://user@lan-host.local/state',{token:'fake-token'}),error=>error.code==='bad-url')
   const large=createTransport({fetchImpl:async()=>({ok:true,headers:new Headers({'content-length':String(600000)}),text:async()=>''})})
   await assert.rejects(large.send('http://127.0.0.1/state',{token:'fake-token'}),error=>error.code==='payload-too-large')
@@ -57,6 +59,8 @@ const plugin=()=>{const record={kind:'plugin',key:'example-plugin',enabled:false
   assert.equal((await ssh.send('http://127.0.0.1:3010/plugin-sync/state',{token:'fake-peer-token',body:{hello:1}})).status,'ok')
   assert.ok(captured.args.includes('-W'));assert.ok(captured.args.includes('127.0.0.1:3010'));assert.ok(captured.args.includes('StrictHostKeyChecking=accept-new'));assert.equal(captured.args.join(' ').includes('fake-peer-token'),false);assert.equal(captured.args.join(' ').includes('curl'),false);assert.match(input,/^POST \/plugin-sync\/state HTTP\/1.1/);assert.match(input,/Authorization: Bearer fake-peer-token/)
   assert.throws(()=>createSshTransport({host:'-oProxyCommand=bad',user:'user',identityFile:'/keys/id',knownHostsFile:'/keys/known'}),/invalid/)
+   assert.throws(()=>createSshTransport({host:'example.com:2222',user:'user',identityFile:'/keys/id',knownHostsFile:'/keys/known'}),/invalid/)
+   assert.doesNotThrow(()=>createSshTransport({host:'2001:db8::1',user:'user',identityFile:'/keys/id',knownHostsFile:'/keys/known'}))
  })
  test('SSH deadline kills the subprocess and enforces response byte limits',async()=>{
   let killed=false
