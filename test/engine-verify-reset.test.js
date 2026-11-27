@@ -237,3 +237,114 @@ test('resetSync ignores credential deletion failures', async () => {
   assert.equal(reset.identity.role, 'unpaired')
   assert.equal(reset.topology, 'center')
 })
+
+test('an interrupted join resumes with the same invitation instead of stranding the peer', async () => {
+  const center = await pairedCenter()
+  const invite = center.createInvitation()
+  const identity = { deviceId: 'interrupted-device', profileId: 'device-p', label: 'Device', role: 'device' }
+
+  // The remote side pairs and consumes the invitation.
+  assert.ok(center.handleHello({ token: invite.token, identity }).center)
+  assert.equal(center.publicState().invitationCount, 0)
+
+  // The joining side failed afterwards (suspend, crash, credential write) and
+  // still holds only the token. Retrying must resume, not require a revoke.
+  const resumed = center.handleHello({ token: invite.token, identity })
+  assert.equal(resumed.resumed, true)
+  assert.equal(resumed.center.deviceId, center.publicState().identity.deviceId)
+  assert.equal(Object.keys(center.publicState().peers).length, 1, 'resume must not pair twice')
+
+  // Another device presenting the consumed token is still refused.
+  const stranger = { ...identity, deviceId: 'other-device' }
+  assert.equal(center.handleHello({ token: invite.token, identity: stranger }).error, 'invalid-invitation')
+
+  // An unpaired profile can still verify the spent invitation without mutating.
+  assert.equal(center.handleHello({ token: invite.token, identity, verify: true }).resumed, true)
+  assert.equal(Object.keys(center.publicState().peers).length, 1)
+
+  // Revoking ends the resume window.
+  await center.revokePeer({ deviceId: 'interrupted-device', actor: 'user' })
+  assert.equal(center.handleHello({ token: invite.token, identity }).error, 'invalid-invitation')
+})
+
+test('invitation records stay bounded on a long-lived host', async () => {
+  const store = memoryStore()
+  const center = createEngine({ store, adapters: adapters({ profileId: 'center-p', label: 'Center' }) })
+  await center.pairCenter({ initSource: 'empty' })
+  const tokens = []
+  for (let index = 0; index < 70; index++) tokens.push(center.createInvitation().token)
+  // The public state never exposes the token map; the bound is a storage fact.
+  const stored = Object.keys(store.read().invitations ?? {})
+  assert.ok(stored.length <= 64, `expected at most 64 invitation records, saw ${stored.length}`)
+  assert.equal(center.publicState().invitationCount, stored.length)
+  // The newest invitation still works after older ones were pruned.
+  const identity = { deviceId: 'late-device', profileId: 'device-p', label: 'Device', role: 'device' }
+  assert.ok(center.handleHello({ token: tokens.at(-1), identity }).center)
+  // A pruned one is gone rather than silently reusable.
+  const gone = { ...identity, deviceId: 'gone-device' }
+  assert.equal(center.handleHello({ token: tokens[0], identity: gone }).error, 'invalid-invitation')
+})
+
+test('a member that revokes its center returns to unpaired instead of a dead member state', async () => {
+  const center = await pairedCenter()
+  const invite = center.createInvitation()
+  const device = createEngine({
+    store: memoryStore(),
+    adapters: adapters({ profileId: 'device-p', label: 'Device' }),
+    transport: link(center),
+    deviceId: 'revoking-device',
+  })
+  await device.joinCenter({ url: ENDPOINT, token: invite.token })
+  const centerId = center.publicState().identity.deviceId
+
+  const revoked = await device.revokePeer({ deviceId: centerId, actor: 'user' })
+  assert.equal(revoked.status, 'revoked')
+  assert.equal(revoked.role, 'unpaired')
+  const after = device.publicState()
+  assert.equal(after.identity.role, 'unpaired')
+  assert.equal(after.center, null)
+  assert.deepEqual(after.peers, {}, 'a revoked route must not keep an address')
+
+  // The profile can pair again (the form is reachable again). The center still
+  // holds its own peer record, so a fresh invitation is refused there until it
+  // revokes as well — that is the remote side's decision, not a local dead end.
+  await assert.rejects(device.verifyInvitation({ url: ENDPOINT, token: center.createInvitation().token }), /device-already-paired/)
+})
+
+test('a member without a center never reports its own cache as a fresh comparison', async () => {
+  const stale = {
+    version: 1,
+    identity: { deviceId: 'stale-device', profileId: 'device-p', label: 'Device', role: 'device' },
+    topology: 'center', policy: undefined, center: null, peers: {}, invitations: {},
+    expected: [], expectedConfig: [], expectedLingshu: [], pluginBaselines: {}, configBaselines: {}, lingshuBaselines: {},
+    revision: { number: 3, author: null, clock: {}, hash: null },
+    proposals: [], conflicts: [], outbox: [], remoteState: null, applied: {}, approvals: {},
+    lastPlan: null, lastConfigPlan: null, lastLingshuPlan: null,
+    lastResults: [], lastConfigResults: [], lastLingshuResults: [], lastStatus: null, lastConfigStatus: null, lastLingshuStatus: null,
+    suggestions: [], pendingSnapshot: null, suspended: false, audit: [],
+  }
+  const engine = createEngine({ store: memoryStore(stale), adapters: adapters({ profileId: 'device-p', label: 'Device' }) })
+  assert.equal((await engine.check({ kind: 'plugin' })).status, 'unpaired')
+})
+
+test('a revoked device learns it was revoked instead of a bare unauthorized', async () => {
+  const center = await pairedCenter()
+  const invite = center.createInvitation()
+  const identity = { deviceId: 'doomed-device', profileId: 'device-p', label: 'Device', role: 'device' }
+  assert.ok(center.handleHello({ token: invite.token, identity }).center)
+  await center.revokePeer({ deviceId: 'doomed-device', actor: 'user' })
+  assert.equal(center.handleGetState({ token: invite.token, deviceId: 'doomed-device' }).error, 'device-revoked')
+  // An unknown device stays a plain authenticated failure.
+  assert.equal(center.handleGetState({ token: invite.token, deviceId: 'nobody' }).error, 'unauthorized')
+})
+
+test('a paused profile refuses policy writes and says why', async () => {
+  const engine = createEngine({ store: memoryStore(), adapters: adapters() })
+  await engine.pairCenter({ initSource: 'empty' })
+  await engine.suspend(true)
+  const policy = { ...engine.publicState().policy, include: ['alpha'] }
+  assert.deepEqual(await engine.setPolicy(policy), { ok: false, reason: 'suspended' })
+  assert.deepEqual(engine.publicState().policy.include, [])
+  await engine.suspend(false)
+  assert.equal((await engine.setPolicy(policy)).ok, true)
+})

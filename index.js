@@ -625,7 +625,7 @@ function validateRemoteBody(route, body) {
   if (route.endsWith('/state')) {
     if (typeof body.deviceId !== 'string' || !body.deviceId || body.deviceId.length > 256) throw new HostError('invalid-device-id')
     if (body.offer !== undefined && (!body.offer || typeof body.offer !== 'object' || Array.isArray(body.offer))) throw new HostError('invalid-offer')
-    if (body.acknowledgedOffers !== undefined && (!Array.isArray(body.acknowledgedOffers) || body.acknowledgedOffers.length > 512 || body.acknowledgedOffers.some(id => typeof id !== 'string' || !id || id.length > 128))) throw new HostError('invalid-acknowledged-offers')
+    if (body.acknowledgedOffers !== undefined && (!Array.isArray(body.acknowledgedOffers) || body.acknowledgedOffers.length > 32 || body.acknowledgedOffers.some(id => !/^cs_[a-f0-9]{24}$/.test(id)))) throw new HostError('invalid-offer-acknowledgment')
   } else {
     if (validateIdentity(identity).length) throw new HostError('invalid-identity')
     if (body.verify !== undefined && typeof body.verify !== 'boolean') throw new HostError('invalid-body')

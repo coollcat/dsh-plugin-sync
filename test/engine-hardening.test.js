@@ -408,7 +408,11 @@ test('archival requires a user and a backup, preserves pending proposals, and re
   assert.deepEqual(engine.publicState().proposals.map(({ id, status }) => ({ id, status })), [{ id: pending.proposalId, status: 'pending' }])
   assert.equal((await nextMember.engine.submitProposal()).status, 'pending')
   const replay = () => engine.handleSubmitProposal({ ...initialWire, token: invitation.token })
-  assert.equal(replay().status, 'duplicate')
+  const replayed = replay()
+  assert.equal(replayed.status, 'duplicate')
+  // The replay must say what happened the first time; "duplicate" alone was
+  // shown as "sent" in the panel.
+  assert.equal(replayed.previous, 'rejected')
   assert.equal(engine.handleAcceptProposal({ proposalId: pending.proposalId, actor: 'user' }).status, 'accepted')
   assert.equal(replay().error, 'stale-parent')
 })

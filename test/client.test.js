@@ -582,13 +582,24 @@ hookTest('parsing an SSH invitation preserves hand-entered host, user and key wh
   assert.ok(joined, 'verification must select the topology advertised by the peer')
 })
 
-hookTest('direct invitations require an explicit reachable address and keep its sync port', async (t) => {
+hookTest('direct invitations keep explicit ports, default bare origins, and preserve proxy base paths', async (t) => {
   const start = state('center')
   const ui = await mount(t, start, answer(start, { invite: () => success({ token: 'lan-token', expiresAt: '2026-01-02' }) }))
   assert.equal(ui.button('Invite a new device').props.disabled, true)
   await ui.fill('http://192.0.2.10:3081', '192.0.2.10:4444')
   await ui.click('Invite a new device')
   assert.ok(ui.all().includes('http://192.0.2.10:4444/plugin-sync/join?invite=lan-token'), ui.all())
+
+  await ui.click('Public network')
+  await ui.fill('https://sync.example.com:3081', 'https://deeplab.icu/ds/')
+  await ui.click('Invite a new device')
+  assert.ok(ui.all().includes('https://deeplab.icu/ds/plugin-sync/join?invite=lan-token'), ui.all())
+  assert.ok(!ui.all().includes('https://deeplab.icu/ds:3081/'), ui.all())
+
+  await ui.click('LAN')
+  await ui.fill('http://192.0.2.10:3081', '192.0.2.11')
+  await ui.click('Invite a new device')
+  assert.ok(ui.all().includes('http://192.0.2.11:3081/plugin-sync/join?invite=lan-token'), ui.all())
 })
 
 hookTest('scope rules visibly override selected plugins', async (t) => {
@@ -683,4 +694,42 @@ hookTest('a surface without a chat shows the fallback instead of failing silentl
   const ui = await mount(t, start, answer(start))
   await ui.click('Ask the agent for suggestions')
   assert.ok(ui.all().includes('This surface cannot open a chat'), ui.all())
+})
+
+hookTest('a late inventory reseeds the scope instead of wiping the saved selection', async (t) => {
+  const start = state('center', { policy: policy({ include: ['alpha', 'beta'] }) })
+  let release
+  const inventory = new Promise((resolve) => { release = resolve })
+  const ui = await mount(t, start, async (body) => {
+    if (body.action === 'state') return success(start)
+    if (body.action === 'inventory') return inventory
+    return success({ status: 'ok' })
+  })
+  // The state call answers first; the panel must not present "nothing selected"
+  // as the current scope while the list is still loading.
+  assert.equal(ui.requests.some((item) => item.action === 'policy'), false)
+  await React.act(async () => {
+    release(success({ plugins: PLUGINS, configs: [] }))
+    await new Promise((resolve) => setTimeout(resolve, 0))
+  })
+  await ui.flush()
+  assert.ok(ui.all().includes('selected 2 of 3'), ui.all())
+  await ui.checkbox('gamma', true)
+  const written = ui.requests.filter((item) => item.action === 'policy').at(-1)
+  assert.deepEqual([...written.policy.include].sort(), ['alpha', 'beta', 'gamma'])
+})
+
+hookTest('an inventory failure is reported and retryable instead of looking empty', async (t) => {
+  const start = state('center')
+  let fail = true
+  const ui = await mount(t, start, (body) => {
+    if (body.action === 'state') return success(start)
+    if (body.action === 'inventory') return fail ? response({ error: 'request-failed' }, 400) : success({ plugins: PLUGINS, configs: [] })
+    return success({ status: 'ok' })
+  })
+  assert.ok(ui.all().includes('The sync service rejected the request'), ui.all())
+  fail = false
+  await ui.click('Reload')
+  await ui.flush()
+  assert.ok(ui.all().includes('alpha'), ui.all())
 })

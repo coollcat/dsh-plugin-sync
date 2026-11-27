@@ -17,6 +17,10 @@ window.__ModuleLoader__.load({
       'invalid-invitation': 'Invalid invitation.', 'invitation-expired': 'Invitation expired.',
       'https-required-outside-loopback': 'Use HTTPS for non-loopback addresses.', 'unresolved-conflict': 'Resolve conflicts first.',
       'invalid-json': 'Invalid JSON.', 'payload-too-large': 'The data exceeds the size limit.',
+      proposalRejected: 'The other device already rejected this exact change. Compare again after it changes something.',
+      'device-revoked': 'The other device revoked this one. Pair again with a new invitation.',
+      'credential-write-failed': 'Could not store the pairing credential on this device.',
+      inventoryLoading: 'Reading the plugin list…',
       'digest-mismatch': 'Snapshot integrity check failed.', 'invalid-snapshot': 'The snapshot was rejected.',
       'signature-required': 'A verified signature is required.', 'already-paired': 'This profile is already paired.',
       'no-approval': 'Approve selected operations first.', 'no-operation-approved': 'Approve at least one operation.',
@@ -138,7 +142,7 @@ window.__ModuleLoader__.load({
       lanHint: 'LAN uses http://IP:3081. The invitation link is the only credential — send it privately.',
       sshModeHint: 'SSH uses your key as the credential. Fill in the SSH host, user, key path and port (default 22).',
       sshInviteModeHint: 'SSH invitations include the host, user and port. No private key is needed on this device.',
-      publicHint: 'Public access must use https:// on the sync port and an invitation link. Anyone with the link can join.',
+      publicHint: 'Public access uses https://. A bare origin defaults to the sync port; a URL with a path is a reverse-proxy base and keeps its standard port.',
       inviteLink: 'Invitation link', inviteLinkHint: 'Paste the full link shared by the other device',
       parseLink: 'Parse link', linkParsed: 'Link parsed. Verify it before connecting.',
       verifyLink: 'Verify link', verified: 'Verified', connect: 'Connect',
@@ -174,6 +178,10 @@ window.__ModuleLoader__.load({
       'invalid-invitation': '邀请码无效。', 'invitation-expired': '邀请码已过期。',
       'https-required-outside-loopback': '非本机地址必须用 HTTPS。', 'unresolved-conflict': '请先处理冲突。',
       'invalid-json': 'JSON 格式不对。', 'payload-too-large': '数据超出大小限制。',
+      proposalRejected: '对方已经拒绝过这次一模一样的改动；等它那边有变化后再重新比对。',
+      'device-revoked': '对端已撤销本机访问，需要用新的邀请重新配对。',
+      'credential-write-failed': '本机没能保存配对凭据。',
+      inventoryLoading: '正在读取插件清单…',
       'digest-mismatch': '快照完整性校验失败。', 'invalid-snapshot': '快照未通过校验。',
       'signature-required': '这里要求验证签名。', 'already-paired': '本设备已经配对。',
       'no-approval': '请先批准选中的操作。', 'no-operation-approved': '至少要批准一项操作。',
@@ -295,7 +303,7 @@ window.__ModuleLoader__.load({
       lanHint: '局域网用 http://设备IP:3081（同步独立端口）。邀请链接是唯一凭据，请私下发送。',
       sshModeHint: 'SSH 用你的私钥作凭据，填好 SSH 主机、用户、密钥路径和端口（默认 22）。',
       sshInviteModeHint: 'SSH 邀请会带上主机、用户和端口；本机不需要填写私钥。',
-      publicHint: '公网请用 https:// 同步端口地址并带邀请链接，拿到链接的人就能连。',
+      publicHint: '公网用 https://。根地址默认追加同步端口；带路径的地址按反向代理基础路径处理，不追加端口。',
       inviteLink: '邀请链接', inviteLinkHint: '粘贴对方发来的完整链接',
       parseLink: '解析链接', linkParsed: '链接已解析，连接前请先验证。',
       verifyLink: '验证链接', verified: '已验证', connect: '连接',
@@ -484,8 +492,11 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         if (!/^https?:\/\//i.test(base)) return null
         const parsed = new URL(text)
         if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash || !/\/plugin-sync\/join\/?$/.test(parsed.pathname)) return null
+        // Rebuild from the parsed URL: the pasted text may carry line breaks or
+        // padding that a single-line address box cannot show.
+        const normalized = `${parsed.origin}${parsed.pathname.replace(/\/plugin-sync\/join\/?$/, '')}`.replace(/\/$/, '')
         return {
-          url: base, token, ssh: false, public: parsed.protocol === 'https:',
+          url: normalized || parsed.origin, token, ssh: false, public: parsed.protocol === 'https:',
           remotePort: parsed.port || (parsed.protocol === 'https:' ? '443' : '80'),
         }
       } catch { return null }
@@ -512,7 +523,9 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         }
         if (mode === 'public' && parsed.protocol !== 'https:') return { url: '', error: 'inviteHttpsRequired' }
         const authority = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]+)/.exec(withScheme)?.[1] ?? ''
-        if (!parsed.port && !/:\d+$/.test(authority)) parsed.port = String(syncPort)
+        // A non-root path denotes a reverse-proxy base such as https://host/ds/.
+        // Only bare origins default to the dedicated sync listener port.
+        if (!parsed.port && parsed.pathname === '/' && !/:\d+$/.test(authority)) parsed.port = String(syncPort)
         const hostname = parsed.hostname.replace(/^\[|\]$/g, '')
         return {
           url: parsed.href.replace(/\/$/, ''),
@@ -712,7 +725,12 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       const timer = useRef(null)
       useEffect(() => {
         if (!server) return
-        const key = JSON.stringify(server)
+        // Inventory arrives after state and decides which saved keys are
+        // addressable. Seeding before it lands made every plugin look unchecked,
+        // so the first click overwrote the saved scope with one entry.
+        const key = JSON.stringify([server, ctl.inventory
+          ? { plugins: ctl.inventory.plugins.map((item) => item.key), configs: ctl.inventory.configs.map((item) => item.entryId) }
+          : 'pending'])
         if (last.current === key) return
         clearTimeout(timer.current)
         last.current = key
@@ -808,12 +826,12 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
       return h('div', { className: 'ps-row', style: { fontSize: 13 } },
         h('strong', {}, state.identity.label),
         h(Badge, {}, t(role)),
-        paired && h('span', { className: `ps-dot${connected || state.suspended ? '' : ' off'}` }),
+        paired && h('span', { className: `ps-dot${connected && !state.suspended ? '' : ' off'}` }),
         paired && h('span', { style: { color: 'var(--dsw-alias-label-secondary)' } },
           state.suspended ? t('suspended') : connected ? t('recentSuccess') : t('waitingForPeer')),
         h('span', { style: { flex: 1 } }),
         h(Button, { quiet: true, onClick: ctl.refresh, disabled: Boolean(ctl.busy) }, t('refresh')),
-        paired && h(Button, { quiet: true, onClick: act(ctl, 'status', 'suspend', { value: !state.suspended }) },
+        paired && h(Button, { quiet: true, disabled: Boolean(ctl.busy), onClick: act(ctl, 'status', 'suspend', { value: !state.suspended }) },
           state.suspended ? t('resume') : t('pause')))
     }
 
@@ -1105,7 +1123,9 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           h(Button, { quiet: true, onClick: exportJson, disabled: !selected.length }, t('exportJson'))),
         h(MemoryScope, { t, ctl, inventory, draft, update, disabled }),
         error && note(statusText(t, error), 'warn'),
-        h(Feedback, { area: 'scope', ctl, t }))
+        h(Feedback, { area: 'scope', ctl, t }),
+        h(Feedback, { area: 'inventory', ctl, t }),
+        !inventory && !ctl.feedback?.inventory && note(t('inventoryLoading')))
     }
 
     function Plan({ ctl, t, kind }) {
@@ -1146,7 +1166,12 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           plan && h(Badge, { tone: plan.operations.length ? '' : 'ok' }, fmt(t(plan.operations.length ? 'waiting' : 'noIncoming'), { n: plan.operations.length })),
           h('span', { className: 'sp' }),
           canPull && h(Button, { quiet: true, disabled: Boolean(idle), onClick: act(ctl, kind.key, 'check', { kind: kind.key }) }, t('compare')),
-          canPropose && h(Button, { quiet: true, disabled: Boolean(idle), onClick: act(ctl, kind.key, 'proposal', { kind: kind.key }, { success: (value) => value?.status ?? 'done' }) }, t('sendTheirs')),
+          canPropose && h(Button, { quiet: true, disabled: Boolean(idle), onClick: act(ctl, kind.key, 'proposal', { kind: kind.key }, {
+            // A resend of an already-decided changeset is a duplicate, not a
+            // delivery: reporting it as "done" made the user wait for an answer
+            // the other side had already given.
+            success: (value) => value?.status === 'duplicate' && ['rejected', 'accepted'].includes(value?.previous) ? 'proposalRejected' : value?.status ?? 'done',
+          }) }, t('sendTheirs')),
           canPublish && h(Button, { quiet: true, disabled: Boolean(idle), onClick: act(ctl, kind.key, 'publishLocal', { kind: kind.key }, { success: (value) => value?.status ?? 'done' }) }, t('publishLocal'))),
         conflicts.length > 0 && h('div', {},
           note(t('conflictHint')),
@@ -1251,7 +1276,8 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
             if (nextForm.ssh) {
               try {
                 const endpoint = new URL(prior.form.url)
-                nextForm.remotePort = endpoint.port || (endpoint.protocol === 'https:' ? '443' : '80')
+                nextForm.remotePort = endpoint.port
+                  || (endpoint.pathname !== '/' ? syncPort : endpoint.protocol === 'https:' ? '443' : '80')
               } catch { /* Keep the last known remote port for an incomplete address. */ }
               nextForm.url = `http://127.0.0.1:${nextForm.remotePort || syncPort}`
             } else if (nextForm.url === `http://127.0.0.1:${syncPort}` || nextForm.url === `http://127.0.0.1:${nextForm.remotePort}`) nextForm.url = ''
@@ -1291,12 +1317,17 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
         })
       }
       const verify = () => ctl.run('verify', async () => {
-        const value = await call('verify', { url: form.url.trim(), token: form.token.trim(), ssh: sshArgs() })
+        const url = form.url.trim()
+        const modeAtRequest = mode
+        const value = await call('verify', { url, token: form.token.trim(), ssh: sshArgs() })
         if (!value?.verified) throw { code: 'verify-failed' }
-        setConnection((prior) => ({
-          ...prior, verified: true,
-          form: { ...prior.form, kind: value.topology === 'p2p' ? 'connectPeer' : 'joinCenter' },
-        }))
+        setConnection((prior) => {
+          // The mode buttons stay usable while the request is in flight. A late
+          // "verified" for a form the user has since edited would enable
+          // "Connect" for an address that was never checked.
+          if (prior.mode !== modeAtRequest || prior.form.url.trim() !== url) return prior
+          return { ...prior, verified: true, form: { ...prior.form, kind: value.topology === 'p2p' ? 'connectPeer' : 'joinCenter' } }
+        })
       }, { reload: false, success: 'verified' })
       const join = () => ctl.run('connection', async () => {
         await call(form.kind, { url: form.url.trim(), token: form.token.trim(), ssh: sshArgs() })
@@ -1339,7 +1370,7 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
           onReopen && h(Button, { quiet: true, onClick: onReopen }, t('guideReopen')),
           h(Button, { quiet: true, disabled, onClick: () => setConfirmReset(true) }, t('resetSync')))
       return h(Card, { title: t('connections'), hint: t('connectionsHint'), actions },
-        preset && h('div', { className: 'ps-preset-banner' },
+        preset && !paired && h('div', { className: 'ps-preset-banner' },
           h('span', { className: 'txt' }, fmt(t('presetBanner'), {
             mode: t(preset.mode === 'center' ? 'modeCenterShort' : 'modePeerShort'),
             action: t(preset.action === 'create' ? 'actionCreateShort' : 'actionJoinShort'),
@@ -1430,11 +1461,12 @@ textarea.ps-input{width:100%;resize:vertical;font-size:12px;line-height:1.5;min-
                   placeholder: mode === 'public' ? `https://sync.example.com:${syncPort}` : `http://192.0.2.10:${syncPort}`,
                   onChange: (event) => setHostAddress(event.target.value),
                 })),
-              directInvite.error && note(t(directInvite.error), 'warn'),
+              String(connection.host ?? '').trim() && directInvite.error && note(t(directInvite.error), 'warn'),
               directInvite.loopback && note(t('inviteLoopbackWarn'), 'warn'),
               listenerLoopback && note(t('inviteListenerLoopbackWarn'), 'warn')),
             h('div', { className: 'ps-row', style: { marginTop: 8 } },
-              h(Button, { primary: true, disabled: disabled || peerLimit || !inviteReady, onClick: createInvite }, t('invite')),
+              h(Button, { primary: true, disabled: disabled || peerLimit || !inviteReady || state.listener?.status === 'error', onClick: createInvite }, t('invite')),
+              state.listener?.status === 'error' && note(t('listenerDown'), 'warn'),
               invite && h(Button, { quiet: true, onClick: () => { ctl.clearFeedback('connection'); setInvite(null) } }, t('hideInvite'))),
             invite && h('div', { style: { marginTop: 8 } },
               h('label', { className: 'ps-field' }, h('span', {}, t('inviteLink')),
